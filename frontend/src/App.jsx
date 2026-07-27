@@ -49,35 +49,39 @@ export default function App() {
   };
 
   // 2. Функция за генериране на Епикриза
-  const handleGenerate = async () => {
-    if (!clinicalData.trim()) return;
-    setLoading(true);
-    setGenError('');
+    const handleGenerate = async () => {
+    setError('');
     setSummary('');
-    setAlerts([]);
+    setLoading(true);
 
     try {
+      // Взимаме УИН-а от обекта doctor, от уин state-а или ползваме резервния УИН
+      const currentUin = doctor?.uin || uin || "1000000000";
+
       const res = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          uin: doctor.uin,
+          uin: String(currentUin),
           clinical_data: clinicalData,
-          model_name: 'gemini-2.5-flash',
+          model_name: 'gemini-2.5-flash'
         }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Грешка при обработката');
 
-      setSummary(data.summary);
-      setAlerts(data.alerts || []);
+      if (!res.ok) {
+        throw new Error(data.detail || 'Грешка при генериране на епикризата');
+      }
+
+      setSummary(data.summary || data.result || JSON.stringify(data));
     } catch (err) {
-      setGenError(err.message);
+      setError(err.message || 'Възникна непредвидена грешка');
     } finally {
       setLoading(false);
     }
   };
+
 
   // -------------------------------------------------------------
   // ЕКРАН 1: ВХОД В СИСТЕМАТА (УИН & Парола)
