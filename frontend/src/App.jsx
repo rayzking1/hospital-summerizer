@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 
 // URL към бекенда (при локално тестване или Render)
-const API_BASE_URL = "http://localhost:8000"; 
+const API_BASE_URL = "https://medisummarize-api.onrender.com";
+ 
 
 export default function App() {
   // Състояние за автентификация
