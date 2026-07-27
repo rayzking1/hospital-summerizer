@@ -10,7 +10,7 @@ app = FastAPI(title="MediSummarize AI API", version="1.0.0")
 # Разрешаваме CORS за връзка с React Frontend-а (Vercel/Netlify или localhost)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["[https://hospital-summarizer.vercel.app](https://hospital-summarizer.vercel.app)"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
