@@ -39,10 +39,14 @@ class LoginRequest(BaseModel):
     uin: str = Field(..., description="10-цифрен УИН на лекаря")
     password: str
 
+from pydantic import BaseModel
+from typing import Optional
+
 class SummarizeRequest(BaseModel):
-    uin: str
     clinical_data: str
-    model_name: str = "gemini-2.5-flash"
+    uin: Optional[str] = ""
+    model_name: Optional[str] = "gemini-2.5-flash"
+
 
 def validate_uin(uin: str):
     if not re.match(r'^\d{10}$', uin):
