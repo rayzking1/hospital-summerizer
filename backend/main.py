@@ -10,11 +10,17 @@ app = FastAPI(title="MediSummarize AI API", version="1.0.0")
 # Разрешаваме CORS за връзка с React Frontend-а (Vercel/Netlify или localhost)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["[https://hospital-summarizer.vercel.app](https://hospital-summarizer.vercel.app)"],
+    allow_origins=[
+        "https://hospital-summarizer.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Взимане на централния API ключ
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
