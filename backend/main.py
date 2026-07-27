@@ -44,17 +44,19 @@ from typing import Optional
 
 class SummarizeRequest(BaseModel):
     clinical_data: str
-    uin: Optional[str] = ""
+    uin: Optional[str] = "1000000000"
     model_name: Optional[str] = "gemini-2.5-flash"
 
-
 def validate_uin(uin: str):
-    if not re.match(r'^\d{10}$', uin):
-        raise HTTPException(
-            status_code=400, 
-            detail="Невалиден УИН! Трябва да съдържа точно 10 цифри."
-        )
-    return uin
+    # Ако няма подаден UIN или е празен, използваме служебния
+    if not uin:
+        return "1000000000"
+    # Почистваме празни пространства
+    clean_uin = str(uin).strip()
+    if not re.match(r'^\d{10}$', clean_uin):
+        return "1000000000"  # Автоматичен fallback към валиден УИН
+    return clean_uin
+
 
 def anonymize_text(text: str) -> str:
     """Анонимизира ЕГН, имена и телефонни номера."""
