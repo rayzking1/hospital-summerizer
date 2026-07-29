@@ -176,17 +176,21 @@ export default function App() {
             onChange={(e) => setClinicalData(e.target.value)}
             style={styles.textarea}
           />
-          <button
+         <button
+            type="button"
             onClick={handleGenerate}
             disabled={loading}
             style={{
               ...styles.btnPrimary,
               marginTop: '16px',
-              backgroundColor: loading ? '#94a3b8' : '#0284c7',
+              backgroundColor: loading ? '#94a3b8' : '#0084c7',
+              width: '100%',
+              cursor: loading ? 'wait' : 'pointer'
             }}
           >
-            {loading ? '⏳ Генериране...' : '🚀 Генерирай Епикриза'}
+            {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
           </button>
+
           {genError && <div style={styles.errorBanner}>{genError}</div>}
         </div>
 
