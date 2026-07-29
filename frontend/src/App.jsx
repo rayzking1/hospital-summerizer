@@ -22,31 +22,39 @@ export default function App() {
   const [genError, setGenError] = useState('');
 
   // 1. Функция за Логин с УИН
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-
-    if (uin.length !== 10 || !/^\d+$/.test(uin)) {
-      setLoginError('УИН трябва да съдържа точно 10 цифри!');
-      return;
-    }
+    const handleGenerate = async () => {
+    setError('');
+    setSummary('');
+    setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      // Взимаме УИН-а от обекта doctor, от уин state-а или ползваме резервния УИН
+      const currentUin = doctor?.uin || uin || "1000000000";
+
+      const res = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uin, password }),
+        body: JSON.stringify({
+          uin: String(currentUin),
+          clinical_data: clinicalData,
+          model_name: 'gemini-2.5-flash'
+        }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Грешка при вход');
 
-      setToken(data.token);
-      setDoctor(data.doctor);
+      if (!res.ok) {
+        throw new Error(data.detail || 'Грешка при генериране на епикризата');
+      }
+
+      setSummary(data.summary || data.result || JSON.stringify(data));
     } catch (err) {
-      setLoginError(err.message);
+      setError(err.message || 'Възникна непредвидена грешка');
+    } finally {
+      setLoading(false);
     }
   };
+
 
   // 2. Функция за генериране на Епикриза
     const handleGenerate = async () => {
