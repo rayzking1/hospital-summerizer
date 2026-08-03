@@ -4,10 +4,11 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -46,7 +47,7 @@ def get_db():
 
 
 # --- FASTAPI ПРИЛОЖЕНИЕ ---
-app = FastAPI(title="MediSummarize AI API", version="1.3.0")
+app = FastAPI(title="MediSummarize AI API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -148,36 +149,6 @@ def login(credits: LoginRequest):
     }
 
 
-# --- НОВ ЕНДПОИНТ ЗА АУДИО ТРАНСКРИПЦИЯ ЧРЕЗ GEMINI ---
-@app.post("/api/transcribe-audio")
-async def transcribe_audio(file: UploadFile = File(...)):
-    if not GEMINI_API_KEY or not client:
-        raise HTTPException(
-            status_code=500, detail="API ключът за Gemini не е настроен."
-        )
-
-    try:
-        audio_bytes = await file.read()
-        mime_type = file.content_type or "audio/webm"
-
-        # Използваме мултимодалните възможности на Gemini за транскрипция на аудио
-        prompt = "Транскрибирай това медицинско аудио съобщение на български език. Върни ЕДИНСТВЕНО точно диктувания текст без допълнителни коментари."
-
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=[
-                {"mime_type": mime_type, "data": audio_bytes},
-                prompt,
-            ],
-        )
-
-        return {"status": "success", "transcript": response.text.strip()}
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Грешка при транскрипция: {str(e)}"
-        )
-
-
 @app.post("/api/summarize")
 def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
     clean_uin = validate_uin(req.uin)
@@ -194,7 +165,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
     try:
         system_instruction = """
         Ти си висококвалифициран медицински асистент. 
-        Входящият текст може да съдържа сурови бележки, транскрибиран гласов текст или разпокъсани данни.
+        Входящият текст може да съдържа сурови бележки, транскрибиран гласов текст (с липсващи препинателни знаци или разпознати разговорни думи) или разпокъсани данни.
 
         Твоята задача е да обработиш и преобразуваш входа в безупречна, академична медицинска епикриза на български език със следните 6 секции:
         1. Окончателна диагноза
@@ -203,14 +174,19 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
         4. Параклинични изследвания
         5. Проведено лечение
         6. Препоръки и терапия за дома
+
+        Нормализирай медицинската терминология и изглади стила на изказване.
         """
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-2.5-flash",
             contents=safe_text,
-            config={"system_instruction": system_instruction},
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction
+            ),
         )
 
+        # Запис в историята
         new_entry = EpicrisisModel(
             doctor_uin=clean_uin,
             clinical_data=safe_text,
@@ -227,6 +203,71 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
             "summary": response.text,
             "alerts": alerts,
         }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    uin: Optional[str] = Form("1000000000"),
+    db: Session = Depends(get_db)
+):
+    """Ендпойнт за качване на аудио файлове и директното им превръщане в епикриза."""
+    clean_uin = validate_uin(uin)
+
+    if not GEMINI_API_KEY or not client:
+        raise HTTPException(
+            status_code=500,
+            detail="API ключът за Gemini не е настроен на сървъра.",
+        )
+
+    try:
+        audio_bytes = await file.read()
+        audio_part = types.Part.from_bytes(
+            data=audio_bytes,
+            mime_type=file.content_type or "audio/mp4"
+        )
+
+        system_instruction = """
+        Ти си медицински транскрибатор и асистент. 
+        Преслушай предоставения аудио запис, извлечи медицинската информация и я организирай в академична епикриза на български език със следните секции:
+        1. Окончателна диагноза
+        2. Анамнеза
+        3. Физикален преглед
+        4. Параклинични изследвания
+        5. Проведено лечение
+        6. Препоръки и терапия за дома
+        """
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[audio_part, "Моля, направи транскрипция и състави епикриза."],
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction
+            ),
+        )
+
+        safe_text = anonymize_text(response.text)
+        alerts = audit_labs(safe_text)
+
+        new_entry = EpicrisisModel(
+            doctor_uin=clean_uin,
+            clinical_data="[Гласов запис / Аудио транскрипция]",
+            summary=response.text,
+            alerts=" | ".join(alerts) if alerts else "",
+        )
+        db.add(new_entry)
+        db.commit()
+        db.refresh(new_entry)
+
+        return {
+            "status": "success",
+            "id": new_entry.id,
+            "summary": response.text,
+            "alerts": alerts,
+        }
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -283,9 +324,11 @@ def generate_pdf(req: SummarizeRequest):
         """
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=safe_text,
-            config={"system_instruction": system_instruction},
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction
+            ),
         )
 
         summary_text = response.text.replace("\n", "<br/>")
