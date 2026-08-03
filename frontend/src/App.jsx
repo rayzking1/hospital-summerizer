@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // URL към Render бекенда
 const API_BASE_URL = "https://medisummarize-api.onrender.com";
@@ -7,6 +7,9 @@ export default function App() {
   // Състояние за автентификация
   const [token, setToken] = useState(null);
   const [doctor, setDoctor] = useState(null);
+
+  // Активен раздел (таб): 'new' (Генериране) или 'history' (История)
+  const [activeTab, setActiveTab] = useState('new');
 
   // Форма за вход
   const [uin, setUin] = useState('1000000000');
@@ -20,6 +23,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [genError, setGenError] = useState('');
+
+  // История
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // 1. Функция за Логин с УИН
   const handleLogin = async (e) => {
@@ -40,7 +47,6 @@ export default function App() {
       setToken(data.token || 'demo_token');
       setDoctor(data.doctor || { name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
     } catch (err) {
-      // Резервен вход
       if (uin === "1000000000" || uin.length === 10) {
         setToken('demo_token');
         setDoctor({ name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
@@ -50,7 +56,32 @@ export default function App() {
     }
   };
 
-  // 2. Функция за генериране на Епикриза (Текст)
+  // 2. Функция за зареждане на историята от бекенда
+  const fetchHistory = async () => {
+    const currentUin = doctor?.uin || uin || "1000000000";
+    setHistoryLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/${currentUin}`);
+      const data = await res.json();
+      if (res.ok && data.history) {
+        setHistory(data.history);
+      }
+    } catch (err) {
+      console.error("Грешка при зареждане на историята:", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Зареждаме историята при смяна на таба към 'history'
+  useEffect(() => {
+    if (token && activeTab === 'history') {
+      fetchHistory();
+    }
+  }, [activeTab, token]);
+
+  // 3. Функция за генериране на Епикриза (Текст)
   const handleGenerate = async () => {
     if (!clinicalData || !clinicalData.trim()) {
       setGenError('Моля, въведете медицински данни в полето отляво.');
@@ -67,13 +98,10 @@ export default function App() {
 
       const res = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           uin: String(currentUin),
           clinical_data: clinicalData,
-          model_name: 'gemini-1.5-flash-latest'
         }),
       });
 
@@ -98,9 +126,10 @@ export default function App() {
     }
   };
 
-  // 3. Функция за изтегляне на Епикриза (PDF)
-  const handleDownloadPdf = async () => {
-    if (!clinicalData || !clinicalData.trim()) {
+  // 4. Функция за изтегляне на Епикриза (PDF)
+  const handleDownloadPdf = async (customData) => {
+    const dataToSend = customData || clinicalData;
+    if (!dataToSend || !dataToSend.trim()) {
       setGenError('Моля, въведете медицински данни, за да изтеглите PDF.');
       return;
     }
@@ -113,12 +142,10 @@ export default function App() {
 
       const res = await fetch(`${API_BASE_URL}/api/generate-pdf`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           uin: String(currentUin),
-          clinical_data: clinicalData,
+          clinical_data: dataToSend,
         }),
       });
 
@@ -127,7 +154,6 @@ export default function App() {
         throw new Error(errData.detail || 'Грешка при генериране на PDF от сървъра.');
       }
 
-      // Получаваме файловия поток (Blob) и задействаме свалянето в браузъра
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -144,9 +170,7 @@ export default function App() {
     }
   };
 
-  // -------------------------------------------------------------
-  // ЕКРАН 1: ВХОД В СИСТЕМАТА (УИН & Парола)
-  // -------------------------------------------------------------
+  // ЕКРАН 1: ВХОД В СИСТЕМАТА
   if (!token) {
     return (
       <div style={styles.loginContainer}>
@@ -196,17 +220,39 @@ export default function App() {
     );
   }
 
-  // -------------------------------------------------------------
-  // ЕКРАН 2: РАБОТНО ТАБЛО (Dashboard)
-  // -------------------------------------------------------------
+  // ЕКРАН 2: РАБОТНО ТАБЛО
   return (
     <div style={styles.dashboard}>
-      {/* Горен панел / Навигация */}
       <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '28px' }}>🏥</span>
-          <h3 style={{ margin: 0, color: '#0f172a' }}>MediSummarize Pro</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '28px' }}>🏥</span>
+            <h3 style={{ margin: 0, color: '#0f172a' }}>MediSummarize Pro</h3>
+          </div>
+
+          {/* Навигация между Нова Епикриза и История */}
+          <nav style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setActiveTab('new')}
+              style={{
+                ...styles.navTab,
+                ...(activeTab === 'new' ? styles.activeTab : {}),
+              }}
+            >
+              📝 Нова Епикриза
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              style={{
+                ...styles.navTab,
+                ...(activeTab === 'history' ? styles.activeTab : {}),
+              }}
+            >
+              📜 История ({history.length})
+            </button>
+          </nav>
         </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ fontSize: '14px', color: '#334155' }}>
             👨‍⚕️ <strong>{doctor?.name || 'д-р Иван Иванов'}</strong> ({doctor?.specialty || 'Кардиология'})
@@ -217,86 +263,149 @@ export default function App() {
         </div>
       </header>
 
-      {/* Основна работна площ */}
-      <main style={styles.mainContent}>
-        {/* Лява колона: Входящи данни */}
-        <div style={styles.card}>
-          <h4 style={styles.cardTitle}>1. Входящи медицински данни</h4>
-          <textarea
-            rows="12"
-            placeholder="Залепете декарци, лабораторни изследвания или анамнеза тук..."
-            value={clinicalData}
-            onChange={(e) => setClinicalData(e.target.value)}
-            style={styles.textarea}
-          />
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={loading || pdfLoading}
-            style={{
-              width: '100%',
-              marginTop: '1rem',
-              padding: '0.9rem',
-              backgroundColor: (loading || pdfLoading) ? '#94a3b8' : '#0084c7',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: 'bold',
-              fontSize: '1rem',
-              cursor: (loading || pdfLoading) ? 'wait' : 'pointer'
-            }}
-          >
-            {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
-          </button>
+      {/* ТАБ 1: Нова Епикриза */}
+      {activeTab === 'new' && (
+        <main style={styles.mainContent}>
+          {/* Лява колона */}
+          <div style={styles.card}>
+            <h4 style={styles.cardTitle}>1. Входящи медицински данни</h4>
+            <textarea
+              rows="12"
+              placeholder="Залепете декарци, лабораторни изследвания или анамнеза тук..."
+              value={clinicalData}
+              onChange={(e) => setClinicalData(e.target.value)}
+              style={styles.textarea}
+            />
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={loading || pdfLoading}
+              style={{
+                width: '100%',
+                marginTop: '1rem',
+                padding: '0.9rem',
+                backgroundColor: (loading || pdfLoading) ? '#94a3b8' : '#0084c7',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                fontSize: '1rem',
+                cursor: (loading || pdfLoading) ? 'wait' : 'pointer'
+              }}
+            >
+              {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
+            </button>
 
-          {genError && <div style={{ ...styles.errorBanner, marginTop: '1rem' }}>{genError}</div>}
-        </div>
+            {genError && <div style={{ ...styles.errorBanner, marginTop: '1rem' }}>{genError}</div>}
+          </div>
 
-        {/* Дясна колона: Генериран резултат & Одит & Сваляне на PDF */}
-        <div style={styles.card}>
-          <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
-          
-          {alerts.length > 0 && (
-            <div style={styles.alertBox}>
-              <strong style={{ color: '#b91c1c' }}>🛡️ Clinical Safety Audit:</strong>
-              <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-                {alerts.map((a, i) => (
-                  <li key={i} style={{ color: '#991b1b', fontSize: '13px' }}>{a}</li>
-                ))}
-              </ul>
+          {/* Дясна колона */}
+          <div style={styles.card}>
+            <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
+            
+            {alerts.length > 0 && (
+              <div style={styles.alertBox}>
+                <strong style={{ color: '#b91c1c' }}>🛡️ Clinical Safety Audit:</strong>
+                <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                  {alerts.map((a, i) => (
+                    <li key={i} style={{ color: '#991b1b', fontSize: '13px' }}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <textarea
+              rows="10"
+              readOnly
+              placeholder="Тук ще се появи готовата структурирана епикриза..."
+              value={summary}
+              style={{ ...styles.textarea, backgroundColor: '#f8fafc' }}
+            />
+
+            <button
+              type="button"
+              onClick={() => handleDownloadPdf()}
+              disabled={pdfLoading || loading || !clinicalData.trim()}
+              style={{
+                width: '100%',
+                marginTop: '1rem',
+                padding: '0.9rem',
+                backgroundColor: (pdfLoading || !clinicalData.trim()) ? '#cbd5e1' : '#0f766e',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                fontSize: '1rem',
+                cursor: (pdfLoading || !clinicalData.trim()) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {pdfLoading ? '⏳ Генериране на PDF...' : '📄 Свали Официална Епикриза (PDF)'}
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* ТАБ 2: История на епикризите */}
+      {activeTab === 'history' && (
+        <div style={{ padding: '32px' }}>
+          <div style={styles.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h4 style={{ margin: 0, color: '#0f172a' }}>📜 История на генерираните епикризи</h4>
+              <button onClick={fetchHistory} style={styles.btnSecondary}>
+                🔄 Обнови
+              </button>
             </div>
-          )}
 
-          <textarea
-            rows="10"
-            readOnly
-            placeholder="Тук ще се появи готовата структурирана епикриза..."
-            value={summary}
-            style={{ ...styles.textarea, backgroundColor: '#f8fafc' }}
-          />
+            {historyLoading ? (
+              <p style={{ color: '#64748b' }}>Зареждане на историята...</p>
+            ) : history.length === 0 ? (
+              <p style={{ color: '#64748b' }}>Все още няма записани епикризи в системата.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {history.map((item) => (
+                  <div key={item.id} style={styles.historyCard}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontWeight: 'bold', color: '#1e293b' }}>
+                        📅 Запис #{item.id} — {item.created_at}
+                      </span>
+                      {item.alerts && item.alerts.length > 0 && item.alerts[0] !== "" && (
+                        <span style={{ color: '#dc2626', fontSize: '12px', fontWeight: 'bold', backgroundColor: '#fef2f2', padding: '2px 8px', borderRadius: '4px' }}>
+                          ⚠️ Critical Alerts ({item.alerts.length})
+                        </span>
+                      )}
+                    </div>
 
-          {/* Бутон за изтегляне на PDF (Винаги видим) */}
-          <button
-            type="button"
-            onClick={handleDownloadPdf}
-            disabled={pdfLoading || !clinicalData.trim()}
-            style={{
-              width: '100%',
-              marginTop: '1rem',
-              padding: '0.9rem',
-              backgroundColor: (pdfLoading || !clinicalData.trim()) ? '#cbd5e1' : '#0f766e',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: 'bold',
-              fontSize: '1rem',
-              cursor: (pdfLoading || !clinicalData.trim()) ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {pdfLoading ? '⏳ Генериране на PDF документ...' : '📄 Свали Официална Епикриза (PDF)'}
-          </button>
+                    <p style={{ color: '#475569', fontSize: '13px', whiteSpace: 'pre-line', maxHeight: '80px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {item.summary}
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                      <button
+                        onClick={() => {
+                          setClinicalData(item.clinical_data);
+                          setSummary(item.summary);
+                          setAlerts(item.alerts.filter(a => a !== ""));
+                          setActiveTab('new');
+                        }}
+                        style={{ ...styles.btnSecondary, backgroundColor: '#e0f2fe', color: '#0369a1', borderColor: '#bae6fd' }}
+                      >
+                        👁️ Преглед в редактора
+                      </button>
+                      <button
+                        onClick={() => handleDownloadPdf(item.clinical_data)}
+                        disabled={pdfLoading}
+                        style={{ ...styles.btnSecondary, backgroundColor: '#f0fdf4', color: '#15803d', borderColor: '#bbf7d0' }}
+                      >
+                        📄 Свали PDF
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }
@@ -356,6 +465,21 @@ const styles = {
     borderRadius: '6px',
     fontSize: '13px',
     cursor: 'pointer',
+    fontWeight: '500',
+  },
+  navTab: {
+    padding: '8px 16px',
+    borderRadius: '6px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: '#64748b',
+    fontWeight: '600',
+    fontSize: '14px',
+    cursor: 'pointer',
+  },
+  activeTab: {
+    backgroundColor: '#e0f2fe',
+    color: '#0369a1',
   },
   errorBanner: {
     padding: '10px',
@@ -411,4 +535,11 @@ const styles = {
     borderRadius: '8px',
     marginBottom: '16px',
   },
+  historyCard: {
+    padding: '16px',
+    borderRadius: '8px',
+    border: '1px solid #e2e8f0',
+    backgroundColor: '#f8fafc',
+  },
 };
+

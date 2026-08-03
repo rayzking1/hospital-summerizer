@@ -169,7 +169,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
         """
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
@@ -247,7 +247,7 @@ def generate_pdf(req: SummarizeRequest):
         """
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
