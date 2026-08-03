@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import re
 import os
-import google.generativeai as genai
+from google import genai
 
 app = FastAPI(title="MediSummarize AI API", version="1.0.0")
 
@@ -22,11 +22,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API Ключ
+# Инициализиране на новия Google GenAI клиент
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 DOCTORS_DB = {
     "1000000000": {
@@ -96,7 +97,7 @@ def login(credits: LoginRequest):
 def generate_summary(req: SummarizeRequest):
     validate_uin(req.uin)
     
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or not client:
         raise HTTPException(
             status_code=500, 
             detail="API ключът за Gemini не е настроен на сървъра."
@@ -117,13 +118,14 @@ def generate_summary(req: SummarizeRequest):
         6. Препоръки и терапия за дома
         """
         
-        # Твърдо дефиниране на актуалния модел gemini-2.0-flash
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-pro",
-            system_instruction=system_instruction
+        # Използваме новия стандартен клиент с gemini-2.5-flash
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=safe_text,
+            config={
+                'system_instruction': system_instruction
+            }
         )
-        
-        response = model.generate_content(safe_text)
         
         return {
             "status": "success",
