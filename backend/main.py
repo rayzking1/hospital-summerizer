@@ -31,7 +31,7 @@ class EpicrisisModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     clinical_data = Column(Text)
     summary = Column(Text)
-    alerts = Column(Text)  # Записваме ги като съобщение с запетаи
+    alerts = Column(Text)
 
 
 Base.metadata.create_all(bind=engine)
@@ -46,7 +46,7 @@ def get_db():
 
 
 # --- FASTAPI ПРИЛОЖЕНИЕ ---
-app = FastAPI(title="MediSummarize AI API", version="1.1.0")
+app = FastAPI(title="MediSummarize AI API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,12 +108,17 @@ def anonymize_text(text: str) -> str:
 
 def audit_labs(text: str) -> list:
     alerts = []
+
+    # Калий
     potassium = re.search(r"калий[:\s]+(\d+[\.,]?\d*)", text, re.IGNORECASE)
     if potassium:
         val = float(potassium.group(1).replace(",", "."))
         if val > 5.5:
             alerts.append(f"⚠️ КРИТИЧНА СТОЙНОСТ: Хиперкалиемия ({val} mmol/L)!")
+        elif val < 3.5:
+            alerts.append(f"⚠️ КРИТИЧНА СТОЙНОСТ: Хипокалиемия ({val} mmol/L)!")
 
+    # Креатинин
     creatinine = re.search(r"креатинин[:\s]+(\d+[\.,]?\d*)", text, re.IGNORECASE)
     if creatinine:
         val = float(creatinine.group(1).replace(",", "."))
@@ -157,24 +162,29 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
     alerts = audit_labs(safe_text)
 
     try:
+        # Подобрен системно инструкция за справяне с гласово диктуван текст
         system_instruction = """
-        Ти си медицински софтуерен асистент. Генерирай академична медицинска епикриза 
-        на български език по следния формат:
+        Ти си висококвалифициран медицински асистент. 
+        Входящият текст може да съдържа сурови бележки, транскрибиран гласов текст (с липсващи препинателни знаци или разпознати разговорни думи) или разпокъсани данни.
+
+        Твоята задача е да обработиш и преобразуваш входа в безупречна, академична медицинска епикриза на български език със следните 6 секции:
         1. Окончателна диагноза
         2. Анамнеза
         3. Физикален преглед
         4. Параклинични изследвания
         5. Проведено лечение
         6. Препоръки и терапия за дома
+
+        Нормализирай медицинската терминология и изглади стила на изказване.
         """
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-1.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
 
-        # Запис в базата данни за историята
+        # Запис в историята
         new_entry = EpicrisisModel(
             doctor_uin=clean_uin,
             clinical_data=safe_text,
@@ -237,7 +247,7 @@ def generate_pdf(req: SummarizeRequest):
         system_instruction = """
         Ти си медицински софтуерен асистент. Генерирай академична медицинска епикриза 
         на български език, готова за отпечатване. 
-        Използвай стандартни HTML тагове (<h2>, <p>, <ul>, <li>, <strong>) за форматиране на секциите:
+        Използвай HTML тагове (<h2>, <p>, <ul>, <li>, <strong>) за форматиране:
         1. Окончателна диагноза
         2. Анамнеза
         3. Физикален преглед
@@ -247,7 +257,7 @@ def generate_pdf(req: SummarizeRequest):
         """
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-1.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
