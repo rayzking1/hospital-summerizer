@@ -72,7 +72,7 @@ export default function App() {
         body: JSON.stringify({
           uin: String(currentUin),
           clinical_data: clinicalData,
-          model_name: 'gemini-2.5-flash'
+          model_name: 'gemini-1.5-flash-latest'
         }),
       });
 
@@ -141,7 +141,7 @@ export default function App() {
             {loginError && <div style={styles.errorBanner}>{loginError}</div>}
 
             <button type="submit" style={styles.btnPrimary}>
-              Вход в системата TEST
+              Вход в системата
             </button>
           </form>
         </div>
