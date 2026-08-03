@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, Optional
 import re
 import os
-from google import genai
+import google.generativeai as genai
 
 app = FastAPI(title="MediSummarize AI API", version="1.0.0")
 
@@ -21,9 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Взимане и почистване на централния API ключ
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-# Взимане на централния API ключ
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # Демо база данни с лекари
 DOCTORS_DB = {
@@ -39,30 +41,22 @@ class LoginRequest(BaseModel):
     uin: str = Field(..., description="10-цифрен УИН на лекаря")
     password: str
 
-from pydantic import BaseModel
-from typing import Optional
-
 class SummarizeRequest(BaseModel):
     clinical_data: str
     uin: Optional[str] = "1000000000"
     model_name: Optional[str] = "gemini-1.5-flash"
 
 def validate_uin(uin: str):
-    # Ако няма подаден UIN или е празен, използваме служебния
     if not uin:
         return "1000000000"
-    # Почистваме празни пространства
     clean_uin = str(uin).strip()
     if not re.match(r'^\d{10}$', clean_uin):
-        return "1000000000"  # Автоматичен fallback към валиден УИН
+        return "1000000000"
     return clean_uin
-
 
 def anonymize_text(text: str) -> str:
     """Анонимизира ЕГН, имена и телефонни номера."""
-    # Премахва ЕГН (10 цифри)
     text = re.sub(r'\b\d{10}\b', '[ЕГН АНОНИМИЗИРАНО]', text)
-    # Премахва телефони
     text = re.sub(r'(\+359|0)\s?\d{2,3}[\s\-]?\d{2,3}[\s\-]?\d{2,3}', '[ТЕЛЕФОН АНОНИМИЗИРАН]', text)
     return text
 
@@ -121,8 +115,6 @@ def generate_summary(req: SummarizeRequest):
     
     # 3. Заявка към Gemini
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
         system_instruction = """
         Ти си медицински софтуерен асистент. Генерирай академична медицинска епикриза 
         на български език по следния формат:
@@ -134,11 +126,13 @@ def generate_summary(req: SummarizeRequest):
         6. Препоръки и терапия за дома
         """
         
-        response = client.models.generate_content(
-            model=req.model_name,
-            contents=[safe_text],
-            config={'system_instruction': system_instruction}
+        # Ползваме стабилното SDK с поддръжка на system_instruction
+        model = genai.GenerativeModel(
+            model_name=req.model_name or "gemini-1.5-flash",
+            system_instruction=system_instruction
         )
+        
+        response = model.generate_content(safe_text)
         
         return {
             "status": "success",
