@@ -141,7 +141,7 @@ export default function App() {
             {loginError && <div style={styles.errorBanner}>{loginError}</div>}
 
             <button type="submit" style={styles.btnPrimary}>
-              Вход в системата
+              Вход в системата TEST
             </button>
           </form>
         </div>
