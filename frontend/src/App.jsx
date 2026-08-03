@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // URL към Render бекенда
 const API_BASE_URL = "https://medisummarize-api.onrender.com";
 
 export default function App() {
-  // Състояние за автентификация
-  const [token, setToken] = useState(null);
-  const [doctor, setDoctor] = useState(null);
+  // Състояние за автентификация (инициализира от localStorage)
+  const [token, setToken] = useState(() => localStorage.getItem('medi_token'));
+  const [doctor, setDoctor] = useState(() => {
+    const saved = localStorage.getItem('medi_doctor');
+    return saved ? JSON.parse(saved) : null;
+  });
 
   // Активен раздел (таб): 'new' (Генериране) или 'history' (История)
   const [activeTab, setActiveTab] = useState('new');
@@ -26,9 +29,13 @@ export default function App() {
 
   // Гласово въвеждане
   const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
-  // История
-  const [history, setHistory] = useState([]);
+  // История (с fallback към localStorage)
+  const [history, setHistory] = useState(() => {
+    const saved = localStorage.getItem('medi_history');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // 1. Функция за Логин с УИН
@@ -47,60 +54,90 @@ export default function App() {
 
       if (!res.ok) throw new Error(data.detail || 'Невалиден УИН или парола');
 
-      setToken(data.token || 'demo_token');
-      setDoctor(data.doctor || { name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
+      const userToken = data.token || 'demo_token';
+      const docData = data.doctor || { name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' };
+
+      setToken(userToken);
+      setDoctor(docData);
+      localStorage.setItem('medi_token', userToken);
+      localStorage.setItem('medi_doctor', JSON.stringify(docData));
     } catch (err) {
       if (uin === "1000000000" || uin.length === 10) {
-        setToken('demo_token');
-        setDoctor({ name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
+        const dummyToken = 'demo_token';
+        const docData = { name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' };
+        setToken(dummyToken);
+        setDoctor(docData);
+        localStorage.setItem('medi_token', dummyToken);
+        localStorage.setItem('medi_doctor', JSON.stringify(docData));
       } else {
         setLoginError(err.message || 'Грешка при вход');
       }
     }
   };
 
-  // 2. Функция за гласово въвеждане (Speech-to-Text на български)
+  const handleLogout = () => {
+    setToken(null);
+    setDoctor(null);
+    localStorage.removeItem('medi_token');
+    localStorage.removeItem('medi_doctor');
+  };
+
+  // 2. Функция за гласово въвеждане (С коригирана референция и дебъг известия)
   const toggleListening = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Вашият браузър не поддържа гласово въвеждане. Използвайте Safari или Chrome.');
+      alert('⚠️ Вашият браузър не поддържа Speech-to-Text. Използвайте Google Chrome или Safari.');
       return;
     }
 
-    if (isListening) {
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
       setIsListening(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'bg-BG'; // Български език
-    recognition.continuous = true;
-    recognition.interimResults = false;
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+      recognition.lang = 'bg-BG'; // Български език
+      recognition.continuous = true;
+      recognition.interimResults = false;
 
-    recognition.onresult = (event) => {
-      const current = event.resultIndex;
-      const transcript = event.results[current][0].transcript;
-      setClinicalData((prev) => (prev ? prev + ' ' + transcript : transcript));
-    };
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
 
-    recognition.onerror = (event) => {
-      console.error('Грешка при гласово въвеждане:', event.error);
+      recognition.onresult = (event) => {
+        const current = event.resultIndex;
+        const transcript = event.results[current][0].transcript;
+        setClinicalData((prev) => (prev ? prev + ' ' + transcript : transcript));
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Грешка при гласово въвеждане:', event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          alert('⚠️ Микрофонът е блокиран. Разрешете достъпа до микрофона от лентата на браузъра (котинарчето до URL-а).');
+        } else if (event.error !== 'no-speech') {
+          alert(`⚠️ Микрофонен проблем: ${event.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch (err) {
+      console.error(err);
+      alert('⚠️ Неуспешно стартиране на микрофона.');
       setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.start();
+    }
   };
 
-  // 3. Функция за зареждане на историята от бекенда
+  // 3. Функция за зареждане на историята от бекенда (с fallback)
   const fetchHistory = async () => {
     const currentUin = doctor?.uin || uin || "1000000000";
     setHistoryLoading(true);
@@ -108,11 +145,12 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/history/${currentUin}`);
       const data = await res.json();
-      if (res.ok && data.history) {
+      if (res.ok && data.history && data.history.length > 0) {
         setHistory(data.history);
+        localStorage.setItem('medi_history', JSON.stringify(data.history));
       }
     } catch (err) {
-      console.error("Грешка при зареждане на историята:", err);
+      console.error("Грешка при зареждане на историята от сървъра:", err);
     } finally {
       setHistoryLoading(false);
     }
@@ -159,9 +197,23 @@ export default function App() {
         : (data.summary ? JSON.stringify(data.summary, null, 2) : data.result);
 
       setSummary(resultText || 'Няма върнат резултат.');
+      const newAlerts = data.alerts || [];
       if (data.alerts) {
-        setAlerts(data.alerts);
+        setAlerts(newAlerts);
       }
+
+      // Запазване локално за историята при изход
+      const newHistoryItem = {
+        id: data.id || Date.now(),
+        created_at: new Date().toLocaleString('bg-BG'),
+        clinical_data: clinicalData,
+        summary: resultText,
+        alerts: newAlerts,
+      };
+      const updatedHistory = [newHistoryItem, ...history];
+      setHistory(updatedHistory);
+      localStorage.setItem('medi_history', JSON.stringify(updatedHistory));
+
     } catch (err) {
       setGenError(err.message || 'Възникна грешка при свързване с бекенда.');
     } finally {
@@ -299,7 +351,7 @@ export default function App() {
           <span style={{ fontSize: '14px', color: '#334155' }}>
             👨‍⚕️ <strong>{doctor?.name || 'д-р Иван Иванов'}</strong> ({doctor?.specialty || 'Кардиология'})
           </span>
-          <button onClick={() => setToken(null)} style={styles.btnSecondary}>
+          <button onClick={handleLogout} style={styles.btnSecondary}>
             Изход
           </button>
         </div>
@@ -420,7 +472,7 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h4 style={{ margin: 0, color: '#0f172a' }}>📜 История на генерираните епикризи</h4>
               <button onClick={fetchHistory} style={styles.btnSecondary}>
-                🔄 Обнови
+                🔄 Обнови от сървъра
               </button>
             </div>
 
@@ -583,6 +635,10 @@ const styles = {
     border: '1px solid #e2e8f0',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
   },
+  cardTitle: {
+    margin: '0 0 16px 0',
+    color: '#0f172a',
+  },
   textarea: {
     width: '100%',
     padding: '12px',
@@ -606,5 +662,3 @@ const styles = {
     backgroundColor: '#f8fafc',
   },
 };
-
-
