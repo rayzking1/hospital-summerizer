@@ -1,10 +1,10 @@
-import io
+iimport io
 import os
 import re
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google import genai
@@ -46,7 +46,7 @@ def get_db():
 
 
 # --- FASTAPI ПРИЛОЖЕНИЕ ---
-app = FastAPI(title="MediSummarize AI API", version="1.2.0")
+app = FastAPI(title="MediSummarize AI API", version="1.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -148,6 +148,36 @@ def login(credits: LoginRequest):
     }
 
 
+# --- НОВ ЕНДПОИНТ ЗА АУДИО ТРАНСКРИПЦИЯ ЧРЕЗ GEMINI ---
+@app.post("/api/transcribe-audio")
+async def transcribe_audio(file: UploadFile = File(...)):
+    if not GEMINI_API_KEY or not client:
+        raise HTTPException(
+            status_code=500, detail="API ключът за Gemini не е настроен."
+        )
+
+    try:
+        audio_bytes = await file.read()
+        mime_type = file.content_type or "audio/webm"
+
+        # Използваме мултимодалните възможности на Gemini за транскрипция на аудио
+        prompt = "Транскрибирай това медицинско аудио съобщение на български език. Върни ЕДИНСТВЕНО точно диктувания текст без допълнителни коментари."
+
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=[
+                {"mime_type": mime_type, "data": audio_bytes},
+                prompt,
+            ],
+        )
+
+        return {"status": "success", "transcript": response.text.strip()}
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Грешка при транскрипция: {str(e)}"
+        )
+
+
 @app.post("/api/summarize")
 def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
     clean_uin = validate_uin(req.uin)
@@ -162,10 +192,9 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
     alerts = audit_labs(safe_text)
 
     try:
-        # Подобрен системно инструкция за справяне с гласово диктуван текст
         system_instruction = """
         Ти си висококвалифициран медицински асистент. 
-        Входящият текст може да съдържа сурови бележки, транскрибиран гласов текст (с липсващи препинателни знаци или разпознати разговорни думи) или разпокъсани данни.
+        Входящият текст може да съдържа сурови бележки, транскрибиран гласов текст или разпокъсани данни.
 
         Твоята задача е да обработиш и преобразуваш входа в безупречна, академична медицинска епикриза на български език със следните 6 секции:
         1. Окончателна диагноза
@@ -174,8 +203,6 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
         4. Параклинични изследвания
         5. Проведено лечение
         6. Препоръки и терапия за дома
-
-        Нормализирай медицинската терминология и изглади стила на изказване.
         """
 
         response = client.models.generate_content(
@@ -184,7 +211,6 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
             config={"system_instruction": system_instruction},
         )
 
-        # Запис в историята
         new_entry = EpicrisisModel(
             doctor_uin=clean_uin,
             clinical_data=safe_text,

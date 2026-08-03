@@ -4,14 +4,13 @@ import React, { useState, useEffect, useRef } from 'react';
 const API_BASE_URL = "https://medisummarize-api.onrender.com";
 
 export default function App() {
-  // Състояние за автентификация (инициализира от localStorage)
+  // Състояние за автентификация
   const [token, setToken] = useState(() => localStorage.getItem('medi_token'));
   const [doctor, setDoctor] = useState(() => {
     const saved = localStorage.getItem('medi_doctor');
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Активен раздел (таб): 'new' (Генериране) или 'history' (История)
   const [activeTab, setActiveTab] = useState('new');
 
   // Форма за вход
@@ -27,18 +26,20 @@ export default function App() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [genError, setGenError] = useState('');
 
-  // Гласово въвеждане
-  const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef(null);
+  // Гласово въвеждане с MediaRecorder (Серверно обработване)
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
-  // История (с fallback към localStorage)
+  // История
   const [history, setHistory] = useState(() => {
     const saved = localStorage.getItem('medi_history');
     return saved ? JSON.parse(saved) : [];
   });
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // 1. Функция за Логин с УИН
+  // 1. Вход
   const handleLogin = async (e) => {
     if (e) e.preventDefault();
     setLoginError('');
@@ -82,62 +83,70 @@ export default function App() {
     localStorage.removeItem('medi_doctor');
   };
 
-  // 2. Функция за гласово въвеждане (С коригирана референция и дебъг известия)
-  const toggleListening = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert('⚠️ Вашият браузър не поддържа Speech-to-Text. Използвайте Google Chrome или Safari.');
-      return;
-    }
-
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+  // 2. Универсален Запис с MediaRecorder
+  const toggleRecording = async () => {
+    if (isRecording) {
+      // Спираме записа
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecording(false);
       return;
     }
 
     try {
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
 
-      recognition.lang = 'bg-BG'; // Български език
-      recognition.continuous = true;
-      recognition.interimResults = false;
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
 
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onresult = (event) => {
-        const current = event.resultIndex;
-        const transcript = event.results[current][0].transcript;
-        setClinicalData((prev) => (prev ? prev + ' ' + transcript : transcript));
-      };
-
-      recognition.onerror = (event) => {
-        console.error('Грешка при гласово въвеждане:', event.error);
-        setIsListening(false);
-        if (event.error === 'not-allowed') {
-          alert('⚠️ Микрофонът е блокиран. Разрешете достъпа до микрофона от лентата на браузъра (котинарчето до URL-а).');
-        } else if (event.error !== 'no-speech') {
-          alert(`⚠️ Микрофонен проблем: ${event.error}`);
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
-      recognition.onend = () => {
-        setIsListening(false);
+      mediaRecorder.onstop = async () => {
+        // Спираме микрофонните писти
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+        
+        // Изпращаме аудиото за транскрипция към бекенда
+        setTranscribing(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'speech.webm');
+
+          const res = await fetch(`${API_BASE_URL}/api/transcribe-audio`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await res.json();
+          if (res.ok && data.transcript) {
+            setClinicalData((prev) => (prev ? prev + ' ' + data.transcript : data.transcript));
+          } else {
+            alert(data.detail || 'Грешка при разпознаване на гласа.');
+          }
+        } catch (err) {
+          alert('Възникна грешка при изпращане на аудиото към сървъра.');
+          console.error(err);
+        } finally {
+          setTranscribing(false);
+        }
       };
 
-      recognition.start();
+      mediaRecorder.start();
+      setIsRecording(true);
     } catch (err) {
       console.error(err);
-      alert('⚠️ Неуспешно стартиране на микрофона.');
-      setIsListening(false);
+      alert('⚠️ Моля, дайте разрешение за достъп до микрофона в браузъра.');
     }
   };
 
-  // 3. Функция за зареждане на историята от бекенда (с fallback)
+  // 3. История
   const fetchHistory = async () => {
     const currentUin = doctor?.uin || uin || "1000000000";
     setHistoryLoading(true);
@@ -150,7 +159,7 @@ export default function App() {
         localStorage.setItem('medi_history', JSON.stringify(data.history));
       }
     } catch (err) {
-      console.error("Грешка при зареждане на историята от сървъра:", err);
+      console.error("Грешка при зареждане на историята:", err);
     } finally {
       setHistoryLoading(false);
     }
@@ -162,7 +171,7 @@ export default function App() {
     }
   }, [activeTab, token]);
 
-  // 4. Функция за генериране на Епикриза (Текст)
+  // 4. Генериране на Епикриза
   const handleGenerate = async () => {
     if (!clinicalData || !clinicalData.trim()) {
       setGenError('Моля, въведете медицински данни в полето отляво.');
@@ -188,9 +197,7 @@ export default function App() {
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.detail || 'Грешка при комуникация с AI сервиза.');
-      }
+      if (!res.ok) throw new Error(data.detail || 'Грешка при комуникация с AI сервиза.');
 
       const resultText = typeof data.summary === 'string' 
         ? data.summary 
@@ -198,11 +205,8 @@ export default function App() {
 
       setSummary(resultText || 'Няма върнат резултат.');
       const newAlerts = data.alerts || [];
-      if (data.alerts) {
-        setAlerts(newAlerts);
-      }
+      if (data.alerts) setAlerts(newAlerts);
 
-      // Запазване локално за историята при изход
       const newHistoryItem = {
         id: data.id || Date.now(),
         created_at: new Date().toLocaleString('bg-BG'),
@@ -221,7 +225,7 @@ export default function App() {
     }
   };
 
-  // 5. Функция за изтегляне на Епикриза (PDF)
+  // 5. Изтегляне на PDF
   const handleDownloadPdf = async (customData) => {
     const dataToSend = customData || clinicalData;
     if (!dataToSend || !dataToSend.trim()) {
@@ -265,7 +269,6 @@ export default function App() {
     }
   };
 
-  // ЕКРАН 1: ВХОД В СИСТЕМАТА
   if (!token) {
     return (
       <div style={styles.loginContainer}>
@@ -315,7 +318,6 @@ export default function App() {
     );
   }
 
-  // ЕКРАН 2: РАБОТНО ТАБЛО
   return (
     <div style={styles.dashboard}>
       <header style={styles.header}>
@@ -360,31 +362,35 @@ export default function App() {
       {/* ТАБ 1: Нова Епикриза */}
       {activeTab === 'new' && (
         <main style={styles.mainContent}>
-          {/* Лява колона */}
           <div style={styles.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h4 style={{ margin: 0, color: '#0f172a' }}>1. Входящи медицински данни</h4>
               
-              {/* Бутон за Гласово Въвеждане */}
+              {/* Бутон за Гласово Въвеждане пренасочен към MediaRecorder */}
               <button
                 type="button"
-                onClick={toggleListening}
+                onClick={toggleRecording}
+                disabled={transcribing}
                 style={{
                   padding: '6px 12px',
-                  backgroundColor: isListening ? '#ef4444' : '#f1f5f9',
-                  color: isListening ? '#ffffff' : '#475569',
-                  border: isListening ? 'none' : '1px solid #cbd5e1',
+                  backgroundColor: isRecording ? '#ef4444' : transcribing ? '#f59e0b' : '#f1f5f9',
+                  color: (isRecording || transcribing) ? '#ffffff' : '#475569',
+                  border: isRecording ? 'none' : '1px solid #cbd5e1',
                   borderRadius: '6px',
                   fontSize: '13px',
                   fontWeight: 'bold',
-                  cursor: 'pointer',
+                  cursor: transcribing ? 'wait' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   transition: 'all 0.2s ease'
                 }}
               >
-                {isListening ? '🔴 Слушам (Говорете)...' : '🎙️ Гласово въвеждане'}
+                {isRecording 
+                  ? '⏹️ Спри записа' 
+                  : transcribing 
+                  ? '⏳ Обработка на гласа...' 
+                  : '🎙️ Гласово въвеждане'}
               </button>
             </div>
 
@@ -399,18 +405,18 @@ export default function App() {
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={loading || pdfLoading}
+              disabled={loading || pdfLoading || transcribing}
               style={{
                 width: '100%',
                 marginTop: '1rem',
                 padding: '0.9rem',
-                backgroundColor: (loading || pdfLoading) ? '#94a3b8' : '#0084c7',
+                backgroundColor: (loading || pdfLoading || transcribing) ? '#94a3b8' : '#0084c7',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 'bold',
                 fontSize: '1rem',
-                cursor: (loading || pdfLoading) ? 'wait' : 'pointer'
+                cursor: (loading || pdfLoading || transcribing) ? 'wait' : 'pointer'
               }}
             >
               {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
@@ -419,7 +425,6 @@ export default function App() {
             {genError && <div style={{ ...styles.errorBanner, marginTop: '1rem' }}>{genError}</div>}
           </div>
 
-          {/* Дясна колона */}
           <div style={styles.card}>
             <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
             
@@ -472,7 +477,7 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h4 style={{ margin: 0, color: '#0f172a' }}>📜 История на генерираните епикризи</h4>
               <button onClick={fetchHistory} style={styles.btnSecondary}>
-                🔄 Обнови от сървъра
+                🔄 Обнови
               </button>
             </div>
 
