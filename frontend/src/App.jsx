@@ -24,6 +24,9 @@ export default function App() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [genError, setGenError] = useState('');
 
+  // Гласово въвеждане
+  const [isListening, setIsListening] = useState(false);
+
   // История
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -56,7 +59,48 @@ export default function App() {
     }
   };
 
-  // 2. Функция за зареждане на историята от бекенда
+  // 2. Функция за гласово въвеждане (Speech-to-Text на български)
+  const toggleListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert('Вашият браузър не поддържа гласово въвеждане. Използвайте Safari или Chrome.');
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'bg-BG'; // Български език
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      const current = event.resultIndex;
+      const transcript = event.results[current][0].transcript;
+      setClinicalData((prev) => (prev ? prev + ' ' + transcript : transcript));
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Грешка при гласово въвеждане:', event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  // 3. Функция за зареждане на историята от бекенда
   const fetchHistory = async () => {
     const currentUin = doctor?.uin || uin || "1000000000";
     setHistoryLoading(true);
@@ -74,14 +118,13 @@ export default function App() {
     }
   };
 
-  // Зареждаме историята при смяна на таба към 'history'
   useEffect(() => {
     if (token && activeTab === 'history') {
       fetchHistory();
     }
   }, [activeTab, token]);
 
-  // 3. Функция за генериране на Епикриза (Текст)
+  // 4. Функция за генериране на Епикриза (Текст)
   const handleGenerate = async () => {
     if (!clinicalData || !clinicalData.trim()) {
       setGenError('Моля, въведете медицински данни в полето отляво.');
@@ -126,7 +169,7 @@ export default function App() {
     }
   };
 
-  // 4. Функция за изтегляне на Епикриза (PDF)
+  // 5. Функция за изтегляне на Епикриза (PDF)
   const handleDownloadPdf = async (customData) => {
     const dataToSend = customData || clinicalData;
     if (!dataToSend || !dataToSend.trim()) {
@@ -230,7 +273,6 @@ export default function App() {
             <h3 style={{ margin: 0, color: '#0f172a' }}>MediSummarize Pro</h3>
           </div>
 
-          {/* Навигация между Нова Епикриза и История */}
           <nav style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => setActiveTab('new')}
@@ -268,14 +310,40 @@ export default function App() {
         <main style={styles.mainContent}>
           {/* Лява колона */}
           <div style={styles.card}>
-            <h4 style={styles.cardTitle}>1. Входящи медицински данни</h4>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h4 style={{ margin: 0, color: '#0f172a' }}>1. Входящи медицински данни</h4>
+              
+              {/* Бутон за Гласово Въвеждане */}
+              <button
+                type="button"
+                onClick={toggleListening}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: isListening ? '#ef4444' : '#f1f5f9',
+                  color: isListening ? '#ffffff' : '#475569',
+                  border: isListening ? 'none' : '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {isListening ? '🔴 Слушам (Говорете)...' : '🎙️ Гласово въвеждане'}
+              </button>
+            </div>
+
             <textarea
               rows="12"
-              placeholder="Залепете декарци, лабораторни изследвания или анамнеза тук..."
+              placeholder="Залепете декарци, лабораторни изследвания или анамнеза тук (или диктувайте с микрофона)..."
               value={clinicalData}
               onChange={(e) => setClinicalData(e.target.value)}
               style={styles.textarea}
             />
+
             <button
               type="button"
               onClick={handleGenerate}
@@ -345,7 +413,7 @@ export default function App() {
         </main>
       )}
 
-      {/* ТАБ 2: История на епикризите */}
+      {/* ТАБ 2: История */}
       {activeTab === 'history' && (
         <div style={{ padding: '32px' }}>
           <div style={styles.card}>
@@ -410,7 +478,7 @@ export default function App() {
   );
 }
 
-// СТИЛОВЕ (Clean Medical Blue)
+// СТИЛОВЕ
 const styles = {
   loginContainer: {
     display: 'flex',
@@ -515,10 +583,6 @@ const styles = {
     border: '1px solid #e2e8f0',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
   },
-  cardTitle: {
-    margin: '0 0 16px 0',
-    color: '#0f172a',
-  },
   textarea: {
     width: '100%',
     padding: '12px',
@@ -542,4 +606,5 @@ const styles = {
     backgroundColor: '#f8fafc',
   },
 };
+
 
