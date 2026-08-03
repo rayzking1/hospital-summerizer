@@ -131,6 +131,11 @@ def audit_labs(text: str) -> list:
     return alerts
 
 
+@app.get("/")
+def read_root():
+    return {"status": "online", "message": "MediSummarize API is running"}
+
+
 @app.post("/api/auth/login")
 def login(credits: LoginRequest):
     validate_uin(credits.uin)
