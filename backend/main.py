@@ -179,7 +179,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
         """
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction
@@ -241,7 +241,7 @@ async def transcribe_audio(
         """
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=[audio_part, "Моля, направи транскрипция и състави епикриза."],
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction
