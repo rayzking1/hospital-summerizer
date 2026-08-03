@@ -1,18 +1,53 @@
 import io
 import os
 import re
-from typing import Optional
+from datetime import datetime
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google import genai
 from pydantic import BaseModel, Field
+from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session, sessionmaker
 from weasyprint import HTML
 
-app = FastAPI(title="MediSummarize AI API", version="1.0.0")
+# --- НАСТРОЙКА НА БАЗАТА ДАННИ (SQLite) ---
+DATABASE_URL = "sqlite:///./epicrises.db"
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-# CORS конфигурация
+
+class EpicrisisModel(Base):
+    __tablename__ = "epicrises"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_uin = Column(String(10), index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    clinical_data = Column(Text)
+    summary = Column(Text)
+    alerts = Column(Text)  # Записваме ги като съобщение с запетаи
+
+
+Base.metadata.create_all(bind=engine)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# --- FASTAPI ПРИЛОЖЕНИЕ ---
+app = FastAPI(title="MediSummarize AI API", version="1.1.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -26,9 +61,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Инициализиране на новия Google GenAI клиент
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-
 client = None
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
@@ -111,8 +144,8 @@ def login(credits: LoginRequest):
 
 
 @app.post("/api/summarize")
-def generate_summary(req: SummarizeRequest):
-    validate_uin(req.uin)
+def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
+    clean_uin = validate_uin(req.uin)
 
     if not GEMINI_API_KEY or not client:
         raise HTTPException(
@@ -136,18 +169,55 @@ def generate_summary(req: SummarizeRequest):
         """
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-1.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
 
+        # Запис в базата данни за историята
+        new_entry = EpicrisisModel(
+            doctor_uin=clean_uin,
+            clinical_data=safe_text,
+            summary=response.text,
+            alerts=" | ".join(alerts) if alerts else "",
+        )
+        db.add(new_entry)
+        db.commit()
+        db.refresh(new_entry)
+
         return {
             "status": "success",
+            "id": new_entry.id,
             "summary": response.text,
             "alerts": alerts,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/history/{uin}")
+def get_history(uin: str, db: Session = Depends(get_db)):
+    clean_uin = validate_uin(uin)
+    records = (
+        db.query(EpicrisisModel)
+        .filter(EpicrisisModel.doctor_uin == clean_uin)
+        .order_by(EpicrisisModel.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for r in records:
+        result.append(
+            {
+                "id": r.id,
+                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "clinical_data": r.clinical_data,
+                "summary": r.summary,
+                "alerts": r.alerts.split(" | ") if r.alerts else [],
+            }
+        )
+
+    return {"status": "success", "history": result}
 
 
 @app.post("/api/generate-pdf")
@@ -177,14 +247,13 @@ def generate_pdf(req: SummarizeRequest):
         """
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-1.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
 
         summary_text = response.text.replace("\n", "<br/>")
 
-        # HTML изглед за генериране на PDF
         alerts_html = ""
         if alerts:
             alerts_items = "".join([f"<li>{a}</li>" for a in alerts])

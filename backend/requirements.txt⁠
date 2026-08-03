@@ -6,3 +6,4 @@ python-docx
 pypdf
 python-multipart
 weasyprint
+sqlalchemy
