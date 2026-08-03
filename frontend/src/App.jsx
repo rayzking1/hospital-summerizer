@@ -18,6 +18,7 @@ export default function App() {
   const [summary, setSummary] = useState('');
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [genError, setGenError] = useState('');
 
   // 1. Функция за Логин с УИН
@@ -49,7 +50,7 @@ export default function App() {
     }
   };
 
-  // 2. Функция за генериране на Епикриза
+  // 2. Функция за генериране на Епикриза (Текст)
   const handleGenerate = async () => {
     if (!clinicalData || !clinicalData.trim()) {
       setGenError('Моля, въведете медицински данни в полето отляво.');
@@ -94,6 +95,52 @@ export default function App() {
       setGenError(err.message || 'Възникна грешка при свързване с бекенда.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 3. Функция за изтегляне на Епикриза (PDF)
+  const handleDownloadPdf = async () => {
+    if (!clinicalData || !clinicalData.trim()) {
+      setGenError('Моля, въведете медицински данни, за да изтеглите PDF.');
+      return;
+    }
+
+    setGenError('');
+    setPdfLoading(true);
+
+    try {
+      const currentUin = doctor?.uin || uin || "1000000000";
+
+      const res = await fetch(`${API_BASE_URL}/api/generate-pdf`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({
+          uin: String(currentUin),
+          clinical_data: clinicalData,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Грешка при генериране на PDF от сървъра.');
+      }
+
+      // Получаваме файловия поток (Blob) и задействаме свалянето в браузъра
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Епикриза_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setGenError(err.message || 'Грешка при изтегляне на PDF файла.');
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -185,18 +232,18 @@ export default function App() {
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={loading}
+            disabled={loading || pdfLoading}
             style={{
               width: '100%',
               marginTop: '1rem',
               padding: '0.9rem',
-              backgroundColor: loading ? '#94a3b8' : '#0084c7',
+              backgroundColor: (loading || pdfLoading) ? '#94a3b8' : '#0084c7',
               color: '#fff',
               border: 'none',
               borderRadius: '8px',
               fontWeight: 'bold',
               fontSize: '1rem',
-              cursor: loading ? 'wait' : 'pointer'
+              cursor: (loading || pdfLoading) ? 'wait' : 'pointer'
             }}
           >
             {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
@@ -205,7 +252,7 @@ export default function App() {
           {genError && <div style={{ ...styles.errorBanner, marginTop: '1rem' }}>{genError}</div>}
         </div>
 
-        {/* Дясна колона: Генериран резултат & Одит */}
+        {/* Дясна колона: Генериран резултат & Одит & Сваляне на PDF */}
         <div style={styles.card}>
           <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
           
@@ -227,6 +274,31 @@ export default function App() {
             value={summary}
             style={{ ...styles.textarea, backgroundColor: '#f8fafc' }}
           />
+
+          {/* Бутон за изтегляне на PDF */}
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={pdfLoading || loading || !clinicalData.trim()}
+            style={{
+              width: '100%',
+              marginTop: '1rem',
+              padding: '0.9rem',
+              backgroundColor: (pdfLoading || loading || !clinicalData.trim()) ? '#cbd5e1' : '#0f766e',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: (pdfLoading || loading || !clinicalData.trim()) ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            {pdfLoading ? '⏳ Подготовка на PDF...' : '📄 Свали Официална Епикриза (PDF)'}
+          </button>
         </div>
       </main>
     </div>
