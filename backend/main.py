@@ -45,7 +45,7 @@ from typing import Optional
 class SummarizeRequest(BaseModel):
     clinical_data: str
     uin: Optional[str] = "1000000000"
-    model_name: Optional[str] = "gemini-2.5-flash"
+    model_name: Optional[str] = "gemini-1.5-flash"
 
 def validate_uin(uin: str):
     # Ако няма подаден UIN или е празен, използваме служебния
