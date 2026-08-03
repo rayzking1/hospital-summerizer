@@ -72,7 +72,7 @@ export default function App() {
         body: JSON.stringify({
           uin: String(currentUin),
           clinical_data: clinicalData,
-          model_name: 'gemini-1.5-flash'
+          model_name: 'gemini-2.5-flash'
         }),
       });
 
