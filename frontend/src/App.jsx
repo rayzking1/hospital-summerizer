@@ -253,50 +253,53 @@ export default function App() {
         </div>
 
         {/* Дясна колона: Генериран резултат & Одит & Сваляне на PDF */}
-<div style={styles.card}>
-  <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
-  
-  {alerts.length > 0 && (
-    <div style={styles.alertBox}>
-      <strong style={{ color: '#b91c1c' }}>🛡️ Clinical Safety Audit:</strong>
-      <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-        {alerts.map((a, i) => (
-          <li key={i} style={{ color: '#991b1b', fontSize: '13px' }}>{a}</li>
-        ))}
-      </ul>
+        <div style={styles.card}>
+          <h4 style={styles.cardTitle}>2. Официална Епикриза & Safety Audit</h4>
+          
+          {alerts.length > 0 && (
+            <div style={styles.alertBox}>
+              <strong style={{ color: '#b91c1c' }}>🛡️ Clinical Safety Audit:</strong>
+              <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                {alerts.map((a, i) => (
+                  <li key={i} style={{ color: '#991b1b', fontSize: '13px' }}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <textarea
+            rows="10"
+            readOnly
+            placeholder="Тук ще се появи готовата структурирана епикриза..."
+            value={summary}
+            style={{ ...styles.textarea, backgroundColor: '#f8fafc' }}
+          />
+
+          {/* Бутон за изтегляне на PDF (Винаги видим) */}
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={pdfLoading || !clinicalData.trim()}
+            style={{
+              width: '100%',
+              marginTop: '1rem',
+              padding: '0.9rem',
+              backgroundColor: (pdfLoading || !clinicalData.trim()) ? '#cbd5e1' : '#0f766e',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: (pdfLoading || !clinicalData.trim()) ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {pdfLoading ? '⏳ Генериране на PDF документ...' : '📄 Свали Официална Епикриза (PDF)'}
+          </button>
+        </div>
+      </main>
     </div>
-  )}
-
-  <textarea
-    rows="10"
-    readOnly
-    placeholder="Тук ще се появи готовата структурирана епикриза..."
-    value={summary}
-    style={{ ...styles.textarea, backgroundColor: '#f8fafc' }}
-  />
-
-  {/* Бутон за изтегляне на PDF (Винаги видим) */}
-  <button
-    type="button"
-    onClick={handleDownloadPdf}
-    disabled={pdfLoading || !clinicalData.trim()}
-    style={{
-      width: '100%',
-      marginTop: '1rem',
-      padding: '0.9rem',
-      backgroundColor: pdfLoading ? '#94a3b8' : '#0f766e',
-      color: '#ffffff',
-      border: 'none',
-      borderRadius: '8px',
-      fontWeight: 'bold',
-      fontSize: '1rem',
-      cursor: pdfLoading ? 'wait' : 'pointer'
-    }}
-  >
-    {pdfLoading ? '⏳ Генериране на PDF документ...' : '📄 Свали Официална Епикриза (PDF)'}
-  </button>
-</div>
-
+  );
+}
 
 // СТИЛОВЕ (Clean Medical Blue)
 const styles = {
