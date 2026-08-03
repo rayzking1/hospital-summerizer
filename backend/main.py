@@ -45,7 +45,7 @@ class LoginRequest(BaseModel):
 class SummarizeRequest(BaseModel):
     clinical_data: str
     uin: Optional[str] = "1000000000"
-    model_name: Optional[str] = "gemini-1.5-flash"
+    model_name: Optional[str] = "gemini-2.0-flash"
 
 def validate_uin(uin: str):
     if not uin:
@@ -127,9 +127,12 @@ def generate_summary(req: SummarizeRequest):
         6. Препоръки и терапия за дома
         """
         
-        # Ползваме стабилното SDK с поддръжка на system_instruction
+        # Автоматично почистваме името на модела от паразитни префикси
+        target_model = req.model_name or "gemini-2.0-flash"
+        target_model = target_model.replace("models/", "").replace("-latest", "")
+        
         model = genai.GenerativeModel(
-            model_name=req.model_name or "gemini-1.5-flash",
+            model_name=target_model,
             system_instruction=system_instruction
         )
         
@@ -141,4 +144,4 @@ def generate_summary(req: SummarizeRequest):
             "alerts": alerts
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
