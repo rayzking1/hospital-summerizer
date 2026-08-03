@@ -57,20 +57,24 @@ export default function App() {
 
 
   // 2. Функция за генериране на Епикриза
-    const handleGenerate = async () => {
+      const handleGenerate = async () => {
+    if (!clinicalData || !clinicalData.trim()) {
+      setError('Моля, въведете медицински данни в полето отляво.');
+      return;
+    }
+
     setError('');
     setSummary('');
     setLoading(true);
 
     try {
-      // Взимаме УИН-а от обекта doctor, от уин state-а или ползваме резервния УИН
-      const currentUin = doctor?.uin || uin || "1000000000";
-
       const res = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({
-          uin: String(currentUin),
+          uin: String(doctor?.uin || uin || "1000000000"),
           clinical_data: clinicalData,
           model_name: 'gemini-2.5-flash'
         }),
@@ -79,16 +83,22 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.detail || 'Грешка при генериране на епикризата');
+        throw new Error(data.detail || 'Грешка при комуникация с AI сервиза.');
       }
 
-      setSummary(data.summary || data.result || JSON.stringify(data));
+      // Поддържаме и двата формата за отговор (string или object)
+      const resultText = typeof data.summary === 'string' 
+        ? data.summary 
+        : (data.summary ? JSON.stringify(data.summary, null, 2) : data.result);
+
+      setSummary(resultText || 'Няма върнат резултат.');
     } catch (err) {
-      setError(err.message || 'Възникна непредвидена грешка');
+      setError(err.message || 'Възникна грешка при свързване с бекенда.');
     } finally {
       setLoading(false);
     }
   };
+
 
 
   // -------------------------------------------------------------
@@ -176,20 +186,26 @@ export default function App() {
             onChange={(e) => setClinicalData(e.target.value)}
             style={styles.textarea}
           />
-         <button
+                   <button
             type="button"
             onClick={handleGenerate}
             disabled={loading}
             style={{
-              ...styles.btnPrimary,
-              marginTop: '16px',
-              backgroundColor: loading ? '#94a3b8' : '#0084c7',
               width: '100%',
+              marginTop: '1rem',
+              padding: '0.9rem',
+              backgroundColor: loading ? '#94a3b8' : '#0084c7',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              fontSize: '1rem',
               cursor: loading ? 'wait' : 'pointer'
             }}
           >
             {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
           </button>
+
 
           {genError && <div style={styles.errorBanner}>{genError}</div>}
         </div>
