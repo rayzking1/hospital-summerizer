@@ -164,7 +164,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         prompt = "Транскрибирай това медицинско аудио съобщение на български език. Върни ЕДИНСТВЕНО точно диктувания текст без допълнителни коментари."
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3.5-flash",
             contents=[
                 {"mime_type": mime_type, "data": audio_bytes},
                 prompt,
@@ -206,7 +206,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
         """
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config={"system_instruction": system_instruction},
         )
