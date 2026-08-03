@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-// URL към бекенда (при локално тестване или Render)
+// URL към Render бекенда
 const API_BASE_URL = "https://medisummarize-api.onrender.com";
 
 export default function App() {
@@ -36,13 +36,13 @@ export default function App() {
 
       if (!res.ok) throw new Error(data.detail || 'Невалиден УИН или парола');
 
-      setToken(data.access_token || 'demo_token');
-      setDoctor(data.doctor || { name: 'Д-р Иван Иванов', uin, specialty: 'Обща медицина' });
+      setToken(data.token || 'demo_token');
+      setDoctor(data.doctor || { name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
     } catch (err) {
       // Резервен вход
       if (uin === "1000000000" || uin.length === 10) {
         setToken('demo_token');
-        setDoctor({ name: 'Д-р Иван Иванов', uin, specialty: 'Обща медицина' });
+        setDoctor({ name: 'д-р Иван Иванов', uin, specialty: 'Кардиология' });
       } else {
         setLoginError(err.message || 'Грешка при вход');
       }
@@ -58,6 +58,7 @@ export default function App() {
 
     setGenError('');
     setSummary('');
+    setAlerts([]);
     setLoading(true);
 
     try {
@@ -86,6 +87,9 @@ export default function App() {
         : (data.summary ? JSON.stringify(data.summary, null, 2) : data.result);
 
       setSummary(resultText || 'Няма върнат резултат.');
+      if (data.alerts) {
+        setAlerts(data.alerts);
+      }
     } catch (err) {
       setGenError(err.message || 'Възникна грешка при свързване с бекенда.');
     } finally {
@@ -158,7 +162,7 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ fontSize: '14px', color: '#334155' }}>
-            👨‍⚕️ <strong>{doctor?.name || 'Д-р Иван Иванов'}</strong> ({doctor?.specialty || 'Обща медицина'})
+            👨‍⚕️ <strong>{doctor?.name || 'д-р Иван Иванов'}</strong> ({doctor?.specialty || 'Кардиология'})
           </span>
           <button onClick={() => setToken(null)} style={styles.btnSecondary}>
             Изход
@@ -229,9 +233,7 @@ export default function App() {
   );
 }
 
-// -------------------------------------------------------------
-// СТИЛОВЕ (Медицинска цветова гама: Clean Medical Blue)
-// -------------------------------------------------------------
+// СТИЛОВЕ (Clean Medical Blue)
 const styles = {
   loginContainer: {
     display: 'flex',
