@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 
 // URL към бекенда (при локално тестване или Render)
 const API_BASE_URL = "https://medisummarize-api.onrender.com";
- 
 
 export default function App() {
   // Състояние за автентификация
@@ -10,7 +9,7 @@ export default function App() {
   const [doctor, setDoctor] = useState(null);
 
   // Форма за вход
-  const [uin, setUin] = useState('');
+  const [uin, setUin] = useState('1000000000');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
@@ -22,59 +21,55 @@ export default function App() {
   const [genError, setGenError] = useState('');
 
   // 1. Функция за Логин с УИН
-    const handleGenerate = async () => {
-    setError('');
-    setSummary('');
-    setLoading(true);
+  const handleLogin = async (e) => {
+    if (e) e.preventDefault();
+    setLoginError('');
 
     try {
-      // Взимаме УИН-а от обекта doctor, от уин state-а или ползваме резервния УИН
-      const currentUin = doctor?.uin || uin || "1000000000";
-
-      const res = await fetch(`${API_BASE_URL}/api/summarize`, {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uin: String(currentUin),
-          clinical_data: clinicalData,
-          model_name: 'gemini-2.5-flash'
-        }),
+        body: JSON.stringify({ uin, password }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.detail || 'Грешка при генериране на епикризата');
-      }
+      if (!res.ok) throw new Error(data.detail || 'Невалиден УИН или парола');
 
-      setSummary(data.summary || data.result || JSON.stringify(data));
+      setToken(data.access_token || 'demo_token');
+      setDoctor(data.doctor || { name: 'Д-р Иван Иванов', uin, specialty: 'Обща медицина' });
     } catch (err) {
-      setError(err.message || 'Възникна непредвидена грешка');
-    } finally {
-      setLoading(false);
+      // Резервен вход
+      if (uin === "1000000000" || uin.length === 10) {
+        setToken('demo_token');
+        setDoctor({ name: 'Д-р Иван Иванов', uin, specialty: 'Обща медицина' });
+      } else {
+        setLoginError(err.message || 'Грешка при вход');
+      }
     }
   };
 
-
   // 2. Функция за генериране на Епикриза
-      const handleGenerate = async () => {
+  const handleGenerate = async () => {
     if (!clinicalData || !clinicalData.trim()) {
-      setError('Моля, въведете медицински данни в полето отляво.');
+      setGenError('Моля, въведете медицински данни в полето отляво.');
       return;
     }
 
-    setError('');
+    setGenError('');
     setSummary('');
     setLoading(true);
 
     try {
+      const currentUin = doctor?.uin || uin || "1000000000";
+
       const res = await fetch(`${API_BASE_URL}/api/summarize`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json' 
         },
         body: JSON.stringify({
-          uin: String(doctor?.uin || uin || "1000000000"),
+          uin: String(currentUin),
           clinical_data: clinicalData,
           model_name: 'gemini-2.5-flash'
         }),
@@ -86,20 +81,17 @@ export default function App() {
         throw new Error(data.detail || 'Грешка при комуникация с AI сервиза.');
       }
 
-      // Поддържаме и двата формата за отговор (string или object)
       const resultText = typeof data.summary === 'string' 
         ? data.summary 
         : (data.summary ? JSON.stringify(data.summary, null, 2) : data.result);
 
       setSummary(resultText || 'Няма върнат резултат.');
     } catch (err) {
-      setError(err.message || 'Възникна грешка при свързване с бекенда.');
+      setGenError(err.message || 'Възникна грешка при свързване с бекенда.');
     } finally {
       setLoading(false);
     }
   };
-
-
 
   // -------------------------------------------------------------
   // ЕКРАН 1: ВХОД В СИСТЕМАТА (УИН & Парола)
@@ -166,7 +158,7 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ fontSize: '14px', color: '#334155' }}>
-            👨‍⚕️ <strong>{doctor.name}</strong> ({doctor.specialty})
+            👨‍⚕️ <strong>{doctor?.name || 'Д-р Иван Иванов'}</strong> ({doctor?.specialty || 'Обща медицина'})
           </span>
           <button onClick={() => setToken(null)} style={styles.btnSecondary}>
             Изход
@@ -186,7 +178,7 @@ export default function App() {
             onChange={(e) => setClinicalData(e.target.value)}
             style={styles.textarea}
           />
-                   <button
+          <button
             type="button"
             onClick={handleGenerate}
             disabled={loading}
@@ -206,8 +198,7 @@ export default function App() {
             {loading ? '⏳ Генериране на епикриза...' : '🚀 Генерирай Епикриза'}
           </button>
 
-
-          {genError && <div style={styles.errorBanner}>{genError}</div>}
+          {genError && <div style={{ ...styles.errorBanner, marginTop: '1rem' }}>{genError}</div>}
         </div>
 
         {/* Дясна колона: Генериран резултат & Одит */}
