@@ -8,7 +8,7 @@ import google.generativeai as genai
 
 app = FastAPI(title="MediSummarize AI API", version="1.0.0")
 
-# Разрешаваме CORS за връзка с React Frontend-а (Vercel/Netlify или localhost)
+# CORS конфигурация
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -22,13 +22,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Взимане и почистване на централния API ключ
+# API Ключ
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# Демо база данни с лекари
 DOCTORS_DB = {
     "1000000000": {
         "name": "д-р Иван Иванов",
@@ -45,7 +44,7 @@ class LoginRequest(BaseModel):
 class SummarizeRequest(BaseModel):
     clinical_data: str
     uin: Optional[str] = "1000000000"
-    model_name: Optional[str] = "gemini-2.0-flash"
+    model_name: Optional[str] = None
 
 def validate_uin(uin: str):
     if not uin:
@@ -56,23 +55,18 @@ def validate_uin(uin: str):
     return clean_uin
 
 def anonymize_text(text: str) -> str:
-    """Анонимизира ЕГН, имена и телефонни номера."""
     text = re.sub(r'\b\d{10}\b', '[ЕГН АНОНИМИЗИРАНО]', text)
     text = re.sub(r'(\+359|0)\s?\d{2,3}[\s\-]?\d{2,3}[\s\-]?\d{2,3}', '[ТЕЛЕФОН АНОНИМИЗИРАН]', text)
     return text
 
 def audit_labs(text: str) -> list:
-    """Проверява за критични лабораторни стойности."""
     alerts = []
-    
-    # Проверка за калий (K+)
     potassium = re.search(r'калий[:\s]+(\d+[\.,]?\d*)', text, re.IGNORECASE)
     if potassium:
         val = float(potassium.group(1).replace(',', '.'))
         if val > 5.5:
             alerts.append(f"⚠️ КРИТИЧНА СТОЙНОСТ: Хиперкалиемия ({val} mmol/L)!")
             
-    # Проверка за креатинин
     creatinine = re.search(r'креатинин[:\s]+(\d+[\.,]?\d*)', text, re.IGNORECASE)
     if creatinine:
         val = float(creatinine.group(1).replace(',', '.'))
@@ -108,13 +102,9 @@ def generate_summary(req: SummarizeRequest):
             detail="API ключът за Gemini не е настроен на сървъра."
         )
 
-    # 1. Сигурност и Анонимизация
     safe_text = anonymize_text(req.clinical_data)
-    
-    # 2. Клиничен одит на стойностите
     alerts = audit_labs(safe_text)
     
-    # 3. Заявка към Gemini
     try:
         system_instruction = """
         Ти си медицински софтуерен асистент. Генерирай академична медицинска епикриза 
@@ -127,12 +117,9 @@ def generate_summary(req: SummarizeRequest):
         6. Препоръки и терапия за дома
         """
         
-        # Автоматично почистваме името на модела от паразитни префикси
-        target_model = req.model_name or "gemini-2.0-flash"
-        target_model = target_model.replace("models/", "").replace("-latest", "")
-        
+        # Твърдо дефиниране на актуалния модел gemini-2.0-flash
         model = genai.GenerativeModel(
-            model_name=target_model,
+            model_name="gemini-2.0-flash",
             system_instruction=system_instruction
         )
         
