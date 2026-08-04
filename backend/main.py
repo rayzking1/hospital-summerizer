@@ -190,7 +190,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config=types.GenerateContentConfig(
                 system_instruction=STRICT_MEDICAL_INSTRUCTION,
@@ -242,7 +242,7 @@ async def transcribe_audio(
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=[audio_part, "Моля, направи транскрипция и състави епикриза на базата единствено на чутото в записа."],
             config=types.GenerateContentConfig(
                 system_instruction=STRICT_MEDICAL_INSTRUCTION,
@@ -316,7 +316,7 @@ def generate_pdf(req: SummarizeRequest):
         pdf_instruction = STRICT_MEDICAL_INSTRUCTION + "\nИзползвай HTML тагове (<h2>, <p>, <ul>, <li>, <strong>) за форматиране на епикризата."
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=safe_text,
             config=types.GenerateContentConfig(
                 system_instruction=pdf_instruction,
