@@ -83,10 +83,9 @@ export default function App() {
     localStorage.removeItem('medi_doctor');
   };
 
-  // 2. Универсален Запис с MediaRecorder
+  // 2. Универсален Запис с MediaRecorder (КОРИГИРАН ЕНДПОЙНТ И ЛОГИКА)
   const toggleRecording = async () => {
     if (isRecording) {
-      // Спираме записа
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
       }
@@ -108,30 +107,51 @@ export default function App() {
       };
 
       mediaRecorder.onstop = async () => {
-        // Спираме микрофонните писти
         stream.getTracks().forEach((track) => track.stop());
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/mp4' });
         
-        // Изпращаме аудиото за транскрипция към бекенда
         setTranscribing(true);
-        try {
-          const formData = new FormData();
-          formData.append('file', audioBlob, 'speech.webm');
+        setGenError('');
 
-          const res = await fetch(`${API_BASE_URL}/api/transcribe-audio`, {
+        try {
+          const currentUin = doctor?.uin || uin || "1000000000";
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'recording.mp4');
+          formData.append('uin', String(currentUin));
+
+          // ✅ КОРИГИРАНО: Точното име на ендпойнта в FastAPI е /api/transcribe
+          const res = await fetch(`${API_BASE_URL}/api/transcribe`, {
             method: 'POST',
             body: formData,
           });
 
           const data = await res.json();
-          if (res.ok && data.transcript) {
-            setClinicalData((prev) => (prev ? prev + ' ' + data.transcript : data.transcript));
+
+          if (res.ok && data.summary) {
+            // Попълваме генерираната епикриза и критичните сигнали от аудиото
+            setSummary(data.summary);
+            setClinicalData("[Гласов запис преслушан и обработен от Gemini]");
+            
+            const newAlerts = data.alerts || [];
+            setAlerts(newAlerts);
+
+            // Добавяме към историята
+            const newHistoryItem = {
+              id: data.id || Date.now(),
+              created_at: new Date().toLocaleString('bg-BG'),
+              clinical_data: "[Гласов запис]",
+              summary: data.summary,
+              alerts: newAlerts,
+            };
+            const updatedHistory = [newHistoryItem, ...history];
+            setHistory(updatedHistory);
+            localStorage.setItem('medi_history', JSON.stringify(updatedHistory));
           } else {
-            alert(data.detail || 'Грешка при разпознаване на гласа.');
+            setGenError(data.detail || 'Грешка при обработката на гласовия запис.');
           }
         } catch (err) {
-          alert('Възникна грешка при изпращане на аудиото към сървъра.');
+          setGenError('Възникна грешка при изпращане на аудиото към сървъра.');
           console.error(err);
         } finally {
           setTranscribing(false);
@@ -227,9 +247,9 @@ export default function App() {
 
   // 5. Изтегляне на PDF
   const handleDownloadPdf = async (customData) => {
-    const dataToSend = customData || clinicalData;
+    const dataToSend = customData || clinicalData || summary;
     if (!dataToSend || !dataToSend.trim()) {
-      setGenError('Моля, въведете медицински данни, за да изтеглите PDF.');
+      setGenError('Моля, въведете медицински данни или генерирайте епикриза, за да изтеглите PDF.');
       return;
     }
 
@@ -366,7 +386,6 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h4 style={{ margin: 0, color: '#0f172a' }}>1. Входящи медицински данни</h4>
               
-              {/* Бутон за Гласово Въвеждане пренасочен към MediaRecorder */}
               <button
                 type="button"
                 onClick={toggleRecording}
@@ -450,18 +469,18 @@ export default function App() {
             <button
               type="button"
               onClick={() => handleDownloadPdf()}
-              disabled={pdfLoading || loading || !clinicalData.trim()}
+              disabled={pdfLoading || loading || (!summary.trim() && !clinicalData.trim())}
               style={{
                 width: '100%',
                 marginTop: '1rem',
                 padding: '0.9rem',
-                backgroundColor: (pdfLoading || !clinicalData.trim()) ? '#cbd5e1' : '#0f766e',
+                backgroundColor: (pdfLoading || (!summary.trim() && !clinicalData.trim())) ? '#cbd5e1' : '#0f766e',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 'bold',
                 fontSize: '1rem',
-                cursor: (pdfLoading || !clinicalData.trim()) ? 'not-allowed' : 'pointer'
+                cursor: (pdfLoading || (!summary.trim() && !clinicalData.trim())) ? 'not-allowed' : 'pointer'
               }}
             >
               {pdfLoading ? '⏳ Генериране на PDF...' : '📄 Свали Официална Епикриза (PDF)'}
@@ -667,3 +686,4 @@ const styles = {
     backgroundColor: '#f8fafc',
   },
 };
+
