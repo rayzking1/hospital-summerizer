@@ -3,7 +3,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +14,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
-from weasyprint import HTML
+
+# --- БЕЗОПАСНА ПРОВЕРКА ЗА WEASYPRINT (За да няма 'Load failed' crash в облака) ---
+WEASYPRINT_AVAILABLE = False
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ WeasyPrint не е наличен (липсват системни библиотеки): {e}")
 
 # --- НАСТРОЙКА НА БАЗАТА ДАННИ (SQLite) ---
 DATABASE_URL = "sqlite:///./epicrises.db"
@@ -97,7 +104,7 @@ SYSTEM_INSTRUCTION = """
 1. Спазвай стриктно предоставената JSON схема. Връщай САМО валиден JSON обект.
 2. Преформулирай бележките на академичен български медицински език.
 3. Извличай само наличните данни. Не измисляй диагнози, стойности или факти.
-4. Ако някова ключова секция липсва в суровия текст (напр. липсва кръвно налягане или липсват препоръки), добави съответно предупреждение в масива `warnings`.
+4. Ако някоя ключова секция липсва в суровия текст (напр. липсва кръвно налягане или липсват препоръки), добави съответно предупреждение в масива `warnings`.
 """
 
 
@@ -138,7 +145,8 @@ class LoginRequest(BaseModel):
 
 
 class SummarizeRequest(BaseModel):
-    clinical_data: str
+    clinical_data: Optional[str] = None
+    summary: Optional[Any] = None
     uin: Optional[str] = "1000000000"
 
 
@@ -152,6 +160,8 @@ def validate_uin(uin: str):
 
 
 def anonymize_text(text: str) -> str:
+    if not text:
+        return ""
     text = re.sub(r"\b\d{10}\b", "[ЕГН АНОНИМИЗИРАНО]", text)
     text = re.sub(
         r"(\+359|0)\s?\d{2,3}[\s\-]?\d{2,3}[\s\-]?\d{2,3}",
@@ -163,6 +173,8 @@ def anonymize_text(text: str) -> str:
 
 def audit_labs(text: str) -> list:
     alerts = []
+    if not text:
+        return alerts
 
     potassium = re.search(r"калий[:\s]+(\d+[\.,]?\d*)", text, re.IGNORECASE)
     if potassium:
@@ -215,6 +227,9 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
             status_code=500,
             detail="API ключът за Gemini не е настроен на сървъра.",
         )
+
+    if not req.clinical_data:
+        raise HTTPException(status_code=400, detail="Моля, въведете медицински данни.")
 
     safe_text = anonymize_text(req.clinical_data)
     alerts = audit_labs(safe_text)
@@ -344,36 +359,44 @@ def get_history(uin: str, db: Session = Depends(get_db)):
 def generate_pdf(req: SummarizeRequest):
     validate_uin(req.uin)
 
+    if not WEASYPRINT_AVAILABLE:
+        raise HTTPException(
+            status_code=500,
+            detail="PDF генераторът (WeasyPrint) не е наличен на този сървър поради липсващи C-библиотеки в Vercel/Render. Използвайте бутона за печат в браузъра.",
+        )
+
     if not GEMINI_API_KEY or not client:
         raise HTTPException(
             status_code=500,
             detail="API ключът за Gemini не е настроен на сървъра.",
         )
 
-    safe_text = anonymize_text(req.clinical_data)
-    alerts = audit_labs(safe_text)
-
     try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=safe_text,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.1,
-                response_mime_type="application/json",
-                response_schema=EpicrisisJSONSchema,
-            ),
-        )
+        # Ако вече има подаден структуриран summary от фронтенда
+        if req.summary and isinstance(req.summary, dict):
+            data = req.summary
+        else:
+            safe_text = anonymize_text(req.clinical_data or "")
+            response = client.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=safe_text,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                    response_schema=EpicrisisJSONSchema,
+                ),
+            )
+            data = json.loads(response.text)
 
-        data = json.loads(response.text)
+        alerts = audit_labs(json.dumps(data, ensure_ascii=False))
 
-        # Рендериране на HTML от JSON структурата
-        procedures_html = "".join([f"<li>{p}</li>" for p in data['diagnoses']['procedures']])
-        comorbidities_html = "".join([f"<li>{c}</li>" for c in data['diagnoses']['comorbidities']])
-        labs_html = "".join([f"<li>{l}</li>" for l in data['status_and_diagnostics']['initial_labs']])
-        imaging_html = "".join([f"<li>{i}</li>" for i in data['status_and_diagnostics']['imaging_and_instrumental']])
-        treatment_html = "".join([f"<li>{t}</li>" for t in data['clinical_course_and_treatment']['treatment_administered']])
-        recs_html = "".join([f"<li>{r}</li>" for r in data['recommendations']])
+        procedures_html = "".join([f"<li>{p}</li>" for p in data.get('diagnoses', {}).get('procedures', [])])
+        comorbidities_html = "".join([f"<li>{c}</li>" for c in data.get('diagnoses', {}).get('comorbidities', [])])
+        labs_html = "".join([f"<li>{l}</li>" for l in data.get('status_and_diagnostics', {}).get('initial_labs', [])])
+        imaging_html = "".join([f"<li>{i}</li>" for i in data.get('status_and_diagnostics', {}).get('imaging_and_instrumental', [])])
+        treatment_html = "".join([f"<li>{t}</li>" for t in data.get('clinical_course_and_treatment', {}).get('treatment_administered', [])])
+        recs_html = "".join([f"<li>{r}</li>" for r in data.get('recommendations', [])])
 
         alerts_html = ""
         if alerts:
@@ -416,42 +439,42 @@ def generate_pdf(req: SummarizeRequest):
             <table class="patient-info-table">
                 <tr>
                     <td class="bg-light" width="20%">Пациент:</td>
-                    <td width="30%">{data['hospitalization_info'].get('patient_name') or '[АНОНИМИЗИРАН]'}</td>
+                    <td width="30%">{data.get('hospitalization_info', {}).get('patient_name') or '[АНОНИМИЗИРАН]'}</td>
                     <td class="bg-light" width="20%">Дата:</td>
                     <td width="30%">{today_date}</td>
                 </tr>
                 <tr>
                     <td class="bg-light">История № (ИЗ):</td>
-                    <td>{data['hospitalization_info'].get('iz_number') or '4821/2026'}</td>
+                    <td>{data.get('hospitalization_info', {}).get('iz_number') or '3912/2026'}</td>
                     <td class="bg-light">Престой:</td>
-                    <td>{data['hospitalization_info'].get('hospitalization_period') or 'Не е посочен'}</td>
+                    <td>{data.get('hospitalization_info', {}).get('hospitalization_period') or 'Не е посочен'}</td>
                 </tr>
             </table>
 
             {alerts_html}
 
             <div class="section-title">1. Окончателна диагноза</div>
-            <p><strong>Основна:</strong> {data['diagnoses']['primary_diagnosis']}</p>
+            <p><strong>Основна:</strong> {data.get('diagnoses', {}).get('primary_diagnosis', '')}</p>
             {f"<p><strong>Процедури:</strong></p><ul>{procedures_html}</ul>" if procedures_html else ""}
             {f"<p><strong>Придружаващи:</strong></p><ul>{comorbidities_html}</ul>" if comorbidities_html else ""}
 
             <div class="section-title">2. Анамнеза</div>
-            <p>{data['anamnesis']['complaints_and_hpi']}</p>
-            <p><strong>Минали заболявания:</strong> {data['anamnesis']['past_medical_history']}</p>
-            <p><strong>Алергии:</strong> {data['anamnesis']['allergies']}</p>
+            <p>{data.get('anamnesis', {}).get('complaints_and_hpi', '')}</p>
+            <p><strong>Минали заболявания:</strong> {data.get('anamnesis', {}).get('past_medical_history', '')}</p>
+            <p><strong>Алергии:</strong> {data.get('anamnesis', {}).get('allergies', '')}</p>
 
             <div class="section-title">3. Обективно състояние и изследвания</div>
-            <p>{data['status_and_diagnostics']['physical_status']}</p>
+            <p>{data.get('status_and_diagnostics', {}).get('physical_status', '')}</p>
             {f"<ul>{labs_html}</ul>" if labs_html else ""}
             {f"<ul>{imaging_html}</ul>" if imaging_html else ""}
 
             <div class="section-title">4. Проведено лечение и еволюция</div>
             {f"<ul>{treatment_html}</ul>" if treatment_html else ""}
-            <p>{data['clinical_course_and_treatment']['evolution']}</p>
+            <p>{data.get('clinical_course_and_treatment', {}).get('evolution', '')}</p>
 
             <div class="section-title">5. Състояние при изписване</div>
-            <p><strong>Изход:</strong> {data['discharge_summary']['outcome']}</p>
-            <p>{data['discharge_summary']['discharge_status']}</p>
+            <p><strong>Изход:</strong> {data.get('discharge_summary', {}).get('outcome', '')}</p>
+            <p>{data.get('discharge_summary', {}).get('discharge_status', '')}</p>
 
             <div class="section-title">6. Препоръки</div>
             <ul>{recs_html}</ul>
