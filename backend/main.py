@@ -46,28 +46,25 @@ def get_db():
         db.close()
 
 
-# --- СТРОГА ИНСТРУКЦИЯ ПРОТИВ ХАЛЮЦИНИРАНЕ (GUARDRAILS) ---
+# --- СТРОГА ИНСТРУКЦИЯ ЗА ОФИЦИАЛЕН БОЛНИЧЕН ФОРМАТ И АНТИ-ХАЛЮЦИНАЦИИ ---
 STRICT_MEDICAL_INSTRUCTION = """
-Ти си медицински софтуерен модул, който генерира ОФИЦИАЛНИ БОЛНИЧНИ ЕПИКРИЗИ.
+Ти си медицински софтуЕРЕН МОДУЛ, който генерира ОФИЦИАЛНИ БОЛНИЧНИ ЕПИКРИЗИ.
 
-КРИТИЧНИ ИЗИСКВАНИЯ ЗА ФОРМАТ:
+КРИТИЧНИ ИЗИСКВАНИЯ ЗА ФОРМАТ И БЕЗОПАСНОСТ:
 1. ВРЪЩАЙ САМО И ЕДИНСТВЕНО ТЕКСТА НА ЕПИКРИЗАТА. 
-2. ЗАБРАНЕНО Е използването на въвеждащи/заключителни изречения (напр. "Ето епикризата:", "Въз основа на предоставения запис...", "Транскрипция:").
-3. ЗАБРАНЕНО Е измислянето на липсващи данни. Ако дадена секция няма информация във входа, напиши: "Няма предоставени данни".
+2. ЗАБРАНЕНО Е използването на въвеждащи или заключителни изречения (напр. "Ето епикризата:", "Въз основа на предоставения запис...", "Транскрипция:"). Започни директно със секция 1.
+3. ЗАБРАНЕНО Е измислянето на липсващи данни. Ако за дадена секция няма информация във входящия текст или аудио, напиши ТОЧНО: "Няма предоставени данни във входящия текст".
+4. Нормализирай медицинската терминология и спазвай академичен медицински стил.
 
 СТРУКТУРА НА СЕКЦИИТЕ (Използвай точно тези заглавия):
-ИЗСЛЕДВАНИЯ И ЛЕЧЕНИЕ
 1. Окончателна диагноза (Основно заболяване, Придружаващи заболявания, Усложнения)
 2. Анамнеза
 3. Обективно състояние (Физикален преглед)
 4. Параклинични и образни изследвания
 5. Проведено лечение и терапевтична динамика
-6. Настъпили усложнения (ако има)
+6. Настъпили усложнения
 7. ИЗХОД ОТ БОЛЕСТТА И СЪСТОЯНИЕ ПРИ ИЗПИСВАНЕТО
-8. Препоръки за домашно лечение, хигиенно-диетичен режим и последващ контрол (вкл. рецепта)
-"""
-
-Нормализирай медицинската терминология, изглади стила на изказване, но спазвай стриктно наличните данни!
+8. Препоръки за домашно лечение, хигиенно-диетичен режим и последващ контрол
 """
 
 
@@ -194,7 +191,7 @@ def generate_summary(req: SummarizeRequest, db: Session = Depends(get_db)):
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-2.5-flash",
             contents=safe_text,
             config=types.GenerateContentConfig(
                 system_instruction=STRICT_MEDICAL_INSTRUCTION,
@@ -246,8 +243,8 @@ async def transcribe_audio(
         )
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=[audio_part, "Моля, направи транскрипция и състави епикриза на базата единствено на чутото в записа."],
+            model="gemini-2.5-flash",
+            contents=[audio_part, "Моля, състави официална епикриза единствено въз основа на чутото в аудиото."],
             config=types.GenerateContentConfig(
                 system_instruction=STRICT_MEDICAL_INSTRUCTION,
                 temperature=0.1,  # Ниска температура срещу халюцинации
@@ -317,10 +314,10 @@ def generate_pdf(req: SummarizeRequest):
     alerts = audit_labs(safe_text)
 
     try:
-        pdf_instruction = STRICT_MEDICAL_INSTRUCTION + "\nИзползвай HTML тагове (<h2>, <p>, <ul>, <li>, <strong>) за форматиране на епикризата."
+        pdf_instruction = STRICT_MEDICAL_INSTRUCTION + "\nИзползвай чисто форматиране с HTML тагове (<h2>, <p>, <ul>, <li>, <strong>) БЕЗ никакви въвеждащи или заключителни коментари."
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-2.5-flash",
             contents=safe_text,
             config=types.GenerateContentConfig(
                 system_instruction=pdf_instruction,
@@ -334,12 +331,15 @@ def generate_pdf(req: SummarizeRequest):
         if alerts:
             alerts_items = "".join([f"<li>{a}</li>" for a in alerts])
             alerts_html = f"""
-            <div style="background-color: #fff5f5; border-left: 4px solid #e53e3e; padding: 10px; margin-bottom: 15px;">
-                <strong style="color: #c53030;">Критични сигнали (Safety Audit):</strong>
-                <ul style="margin: 5px 0 0 0; color: #9b2c2c;">{alerts_items}</ul>
+            <div style="background-color: #fff5f5; border: 1px solid #feb2b2; padding: 8px 12px; margin-bottom: 15px; border-radius: 4px;">
+                <strong style="color: #c53030; font-size: 9pt;">⚠️ КЛИНИЧНИ СИГНАЛИ (Safety Audit):</strong>
+                <ul style="margin: 3px 0 0 0; color: #9b2c2c; font-size: 8.5pt;">{alerts_items}</ul>
             </div>
             """
 
+        today_date = datetime.now().strftime("%d.%m.%Y г.")
+
+        # БОЛНИЧНА БЛАНКА В СТАНДАРТЕН БЪЛГАРСКИ ФОРМАТ
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -348,60 +348,131 @@ def generate_pdf(req: SummarizeRequest):
             <style>
                 @page {{
                     size: A4;
-                    margin: 20mm 15mm;
+                    margin: 15mm 15mm 20mm 15mm;
                 }}
                 body {{
                     font-family: 'DejaVu Sans', Arial, sans-serif;
-                    color: #2d3748;
-                    line-height: 1.6;
-                    font-size: 10.5pt;
+                    color: #1a202c;
+                    line-height: 1.4;
+                    font-size: 9.5pt;
                 }}
-                .header {{
-                    border-bottom: 2px solid #2b6cb0;
-                    padding-bottom: 10px;
-                    margin-bottom: 20px;
+                .hospital-header {{
+                    text-align: center;
+                    border-bottom: 2px solid #1a365d;
+                    padding-bottom: 8px;
+                    margin-bottom: 12px;
                 }}
-                .header h1 {{
-                    color: #2b6cb0;
-                    font-size: 18pt;
-                    margin: 0;
+                .hospital-title {{
+                    font-size: 13pt;
+                    font-weight: bold;
+                    color: #1a365d;
                     text-transform: uppercase;
                 }}
-                .header .subtext {{
-                    color: #718096;
+                .hospital-sub {{
+                    font-size: 8.5pt;
+                    color: #4a5568;
+                }}
+                .doc-title {{
+                    text-align: center;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    letter-spacing: 1px;
+                    margin: 10px 0;
+                    color: #000;
+                }}
+                .patient-info-table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 15px;
+                    font-size: 8.5pt;
+                }}
+                .patient-info-table td {{
+                    border: 1px solid #cbd5e0;
+                    padding: 4px 6px;
+                }}
+                .bg-light {{
+                    background-color: #f7fafc;
+                    font-weight: bold;
+                }}
+                .content h2 {{
+                    color: #1a365d;
+                    font-size: 10pt;
+                    border-bottom: 1px solid #e2e8f0;
+                    margin-top: 10px;
+                    margin-bottom: 4px;
+                    text-transform: uppercase;
+                }}
+                .signatures {{
+                    margin-top: 30px;
+                    width: 100%;
                     font-size: 9pt;
                 }}
-                .content {{
-                    margin-top: 10px;
-                }}
-                h2 {{
-                    color: #2c5282;
-                    font-size: 12pt;
-                    border-bottom: 1px solid #e2e8f0;
-                    padding-bottom: 3px;
-                    margin-top: 15px;
+                .signatures td {{
+                    vertical-align: top;
                 }}
                 .footer {{
-                    margin-top: 40px;
-                    border-top: 1px solid #cbd5e0;
-                    padding-top: 10px;
-                    font-size: 8pt;
-                    color: #a0aec0;
+                    position: fixed;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    font-size: 7.5pt;
+                    color: #718096;
                     text-align: center;
+                    border-top: 1px solid #e2e8f0;
+                    padding-top: 4px;
                 }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>МЕДИЦИНСКА ЕПИКРИЗА</h1>
-                <div class="subtext">MediSummarize AI | Подготвена за подпис от лекар</div>
+            <div class="hospital-header">
+                <div class="hospital-title">УМБАЛ "АЛЕКСАНДРОВСКА" ЕАД</div>
+                <div class="hospital-sub">гр. София, бул. "Св. Георги Софийски" № 1 | Тел: 02 / 9230 111</div>
             </div>
+
+            <div class="doc-title">Е П И К Р И З А</div>
+
+            <table class="patient-info-table">
+                <tr>
+                    <td class="bg-light" width="18%">ИЗ История №:</td>
+                    <td width="32%">{datetime.now().strftime("%Y%m%d")}-042</td>
+                    <td class="bg-light" width="18%">Дата на издаване:</td>
+                    <td width="34%">{today_date}</td>
+                </tr>
+                <tr>
+                    <td class="bg-light">Пациент (Имена):</td>
+                    <td>[АНОНИМИЗИРАН ПАЦИЕНТ]</td>
+                    <td class="bg-light">ЕГН / ЛНЧ:</td>
+                    <td>[ЕГН АНОНИМИЗИРАНО]</td>
+                </tr>
+                <tr>
+                    <td class="bg-light">Клиника / Отделение:</td>
+                    <td>Клиника по Кардиология</td>
+                    <td class="bg-light">Лекуващ лекар:</td>
+                    <td>д-р Иван Иванов (УИН: {req.uin})</td>
+                </tr>
+            </table>
+
             {alerts_html}
+
             <div class="content">
                 {summary_text}
             </div>
+
+            <table class="signatures">
+                <tr>
+                    <td width="50%">
+                        <strong>Лекуващ лекар:</strong> ........................<br/>
+                        <span style="font-size: 8pt; color: #4a5568;">/ д-р Иван Иванов /</span>
+                    </td>
+                    <td width="50%" style="text-align: right;">
+                        <strong>Зав. Клиника / Отделение:</strong> ........................<br/>
+                        <span style="font-size: 8pt; color: #4a5568;">/ Проф. д-р М. Петров, дмн /</span>
+                    </td>
+                </tr>
+            </table>
+
             <div class="footer">
-                Документът съдържа анонимизирани данни. Изисква преглед и подпис от лекуващия лекар.
+                Документът е генериран през MediSummarize Pro. Изисква физически печат и подпис за официална валидност.
             </div>
         </body>
         </html>
@@ -413,7 +484,7 @@ def generate_pdf(req: SummarizeRequest):
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={
-                "Content-Disposition": "attachment; filename=epicrisis.pdf"
+                "Content-Disposition": "attachment; filename=epicrisis_official.pdf"
             },
         )
     except Exception as e:
